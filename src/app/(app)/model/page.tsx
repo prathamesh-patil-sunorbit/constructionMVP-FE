@@ -19,7 +19,7 @@ export default function ModelPage() {
     <>
       <PageHeader
         title="3D / 4D building model"
-        subtitle="Parametric massing from the activity plan. Not a BIM or surveyed model."
+        subtitle="City Life tower. Each floor is split into 3 BHK and 2 BHK rooms, with stairs and lifts in the corridor."
         actions={projects && projects.length > 1 ? (
           <Select value={selected} onChange={(e) => setProjectId(e.target.value)} className="max-w-56">
             {projects.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}

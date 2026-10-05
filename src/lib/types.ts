@@ -620,7 +620,7 @@ export interface BuildingModel {
   components: {
     id: string; type: string; category: string; tower: string; floorName: string | null; floorIndex: number;
     position: [number, number, number]; size: [number, number, number];
-    label: string; activityIds: string[]; side?: string; subtype?: string;
+    label: string; activityIds: string[]; side?: string; subtype?: string; skin?: string; unit?: string | null;
     rotation?: [number, number, number]; callout?: string; engineering?: boolean;
   }[];
   activities: {
@@ -637,4 +637,54 @@ export interface BuildingModel {
   timeline: { start: string; end: string; days: number } | null;
   categories: string[];
   disclaimer: string;
+}
+
+export interface PlanCheck {
+  project: {
+    name: string;
+    location: string;
+    architect: string;
+    drawnBy: string;
+    jobNo: string;
+    clientOnUnitPlans: string;
+    marketing: string;
+    stackOnDrawing: string;
+    stackOnBooklet: string;
+    corridorM: number;
+    lifts: string;
+    refugeAreaSqm: number;
+  };
+  summary: { pass: number; warning: number; fail: number };
+  checks: { id: number; status: "pass" | "warning" | "fail"; title: string; detail: string; source: string }[];
+  sheets: { number: string; rev: string; title: string; date: string; dwgPresent: boolean; pdfPresent: boolean }[];
+  residential: {
+    type: string;
+    carpet: number;
+    balcony: number;
+    terrace: number;
+    totalSqm: number;
+    carpetSqft: number;
+    salableSqft: number;
+    computedTotalSqm: number;
+    computedCarpetSqft: number;
+    computedSalableSqft: number;
+  }[];
+  shops: {
+    type: string;
+    count: number;
+    carpet: number;
+    mezz: number;
+    totalSqm: number;
+    salableSqft: number;
+    groupSalableSqft?: number;
+    computedTotalSqm: number;
+    computedSalableSqft: number;
+  }[];
+  shopCount: number;
+  floors: {
+    typical: { floors: number[]; flatsPerFloor: number };
+    refuge: { floors: number[]; flatsPerFloor: number; refugeAreaSqm: number };
+    first: { floors: number[]; largeFlats: number[]; twoBhkA: number[] };
+  };
+  rooms: { type: string; rooms: { name: string; widthM: number; depthM: number }[] }[];
 }

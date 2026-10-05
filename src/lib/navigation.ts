@@ -22,6 +22,7 @@ const teams = item("/integrations", "Teams & Data Sources", "Colab sync, teams")
 const aiInsights = item("/ai", "AI Intelligence", "Forecast, delays, resources");
 const copilot = item("/copilot", "Copilot", "Ask about the project");
 const model3d = item("/model", "3D / 4D Model", "Building + timeline");
+const planCheck = item("/plans", "Drawing Check", "City Life plan set");
 const reports = item("/reports", "AI Reports", "Daily / weekly / health");
 const siteReports = item("/site-reports", "Site Reports", "Daily site DPR");
 const auditTrail = item("/audit", "Audit Trail", "Who changed what");
@@ -31,34 +32,34 @@ const admin = item("/admin", "Users & Rules", "Users, roles, thresholds");
 export const NAV_BY_ROLE: Record<Role, NavSection[]> = {
   site_engineer: [
     { title: "My work", items: [today("My Day"), siteReports, blockers("My Blockers"), notifications] },
-    { title: "Site", items: [projects("Project Activities"), aiInsights, model3d] },
+    { title: "Site", items: [projects("Project Activities"), aiInsights, model3d, planCheck] },
   ],
   site_manager: [
     { title: "Monitor", items: [dashboard, today("Site Plan"), risks, notifications] },
-    { title: "Intelligence", items: [aiInsights, copilot, model3d, reports] },
+    { title: "Intelligence", items: [aiInsights, copilot, model3d, planCheck, reports] },
     { title: "Manage", items: [blockers(), projects("Projects & Planning"), siteReports] },
     { title: "Records", items: [teams, auditTrail] },
   ],
   project_manager: [
     { title: "Monitor", items: [dashboard, risks, notifications] },
-    { title: "Intelligence", items: [aiInsights, copilot, model3d, reports] },
+    { title: "Intelligence", items: [aiInsights, copilot, model3d, planCheck, reports] },
     { title: "Plan", items: [projects("Projects & Planning"), teams] },
     { title: "Site", items: [today("Site Plan"), blockers(), siteReports] },
     { title: "Records", items: [auditTrail] },
   ],
   planning_engineer: [
     { title: "Overview", items: [dashboard, projects("Schedule & Projects"), notifications] },
-    { title: "Intelligence", items: [aiInsights, copilot, model3d, reports] },
+    { title: "Intelligence", items: [aiInsights, copilot, model3d, planCheck, reports] },
     { title: "Planning data", items: [teams] },
   ],
   estimation_engineer: [
     { title: "Overview", items: [dashboard, projects("Projects & Estimates"), notifications] },
-    { title: "Intelligence", items: [aiInsights, reports] },
+    { title: "Intelligence", items: [aiInsights, planCheck, reports] },
     { title: "Estimation data", items: [teams] },
   ],
   admin: [
     { title: "Overview", items: [dashboard, projects(), notifications] },
-    { title: "Intelligence", items: [aiInsights, copilot, model3d, reports] },
+    { title: "Intelligence", items: [aiInsights, copilot, model3d, planCheck, reports] },
     { title: "Setup", items: [admin, teams] },
     { title: "Records", items: [risks, blockers(), siteReports, auditTrail] },
   ],
