@@ -21,7 +21,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (ready && !user) router.replace("/login");
     else if (user && !allowed) router.replace(homeFor(user));
   }, [ready, user, allowed, router]);
-
+ 
   useEffect(() => {
     if (!user) return;
     const load = () => api<{ unread: number }>("/notifications").then((r) => setUnread(r.unread)).catch(() => {});
