@@ -688,3 +688,162 @@ export interface PlanCheck {
   };
   rooms: { type: string; rooms: { name: string; widthM: number; depthM: number }[] }[];
 }
+
+// ---------- Geotech agent (plinth estimate) ----------
+export type SoilClass = "soft" | "ordinary" | "hard" | "rock";
+export type FoundationType = "isolated" | "raft" | "pile";
+
+export interface SoilLayer {
+  fromDepthM: number | null;
+  toDepthM: number | null;
+  description: string;
+  sptN: number | null;
+  sourceText: string | null;
+  page?: number | null;
+}
+
+export interface GeotechEvidence {
+  quote: string;
+  page: number | null;
+}
+
+export interface GeotechFacts {
+  isGeotechnicalReport: boolean;
+  reportTitle: string | null;
+  boreholes: number | null;
+  layers: SoilLayer[];
+  groundwaterDepthM: number | null;
+  groundwaterNote: string | null;
+  rockOrBoulderPresent: boolean | null;
+  rockDepthM: number | null;
+  bearingCapacity: { value: number; unit: string; depthM: number | null; sourceText: string | null; page?: number | null; kNm2: number | null } | null;
+  recommendedFoundation: FoundationType | null;
+  recommendedDepthM: number | null;
+  evidence?: { groundwater: GeotechEvidence | null; rock: GeotechEvidence | null; foundation: GeotechEvidence | null; depth: GeotechEvidence | null };
+  keyFindings?: { label: string; value: string; page: number | null }[];
+  notes: string | null;
+  completeness: { found: number; of: number; missing: string[] };
+  readQuality?: { attempts: number; issues: string[]; via?: "text" | "pdf" | "file"; pages?: number | null };
+}
+
+export interface GeotechPhase {
+  key: string;
+  name: string;
+  insufficientData?: boolean;
+  reason?: string;
+  quantity: { value: number; unit: string; label: string } | null;
+  days: number;
+  startDay: number;
+  endDay: number;
+  workers: { trade: string; count: number }[];
+  workerTotal: number;
+  machines: { name: string; count: number }[];
+  vehicles: { name: string; count: number }[];
+  basis: string[];
+}
+
+export interface GeotechLearnedRate {
+  default: number;
+  used: number;
+  factor: number;
+  observations: number;
+  weight: number;
+}
+
+export interface GeotechEstimate {
+  soil: { class: SoilClass; label: string; dewatering: boolean; sbcKnM2: number | null; reasons: string[] };
+  foundation: { type: FoundationType; source: "report" | "rule" | "assumed"; reason: string; label: string };
+  inputs: { plinthAreaSqm: number; depthM: number; depthSource: "user" | "report" | "default" };
+  excavation: { inSituVolumeM3: number; looseVolumeM3: number; days: number; jcbs: number; ratePerJcbDay: number };
+  phases: GeotechPhase[];
+  totals: {
+    calendarDays: number;
+    partial: boolean;
+    peakWorkers: number;
+    peakJcbs: number;
+    tippers: number;
+    machines: { name: string; count: number }[];
+    otherVehicles: { name: string; count: number }[];
+  };
+  warnings: { level: "critical" | "warning" | "attention" | "info"; text: string }[];
+  assumptions: string[];
+  learning: {
+    observations: number;
+    siteFactor: number;
+    rate: GeotechLearnedRate | null;
+    scheduleFactor: number;
+    scheduleObservations: number;
+  } | null;
+  confidence: number;
+  confidenceBasis: string[];
+}
+
+export interface GeotechReport {
+  _id: string;
+  project: string;
+  source: "upload" | "sample";
+  uploadedBy?: User;
+  file?: { originalName: string; url: string; mimetype: string; size: number };
+  extraction: { status: "Read" | "Not read" | "Sample"; reason?: string; model?: string; facts: GeotechFacts | null };
+  inputs: { plinthAreaSqm: number; depthM: number | null; depthUsedM?: number; depthSource?: string };
+  estimate: GeotechEstimate | null;
+  narration: { summary: string; warnings?: string[]; recommendations: { action: string; rationale: string }[]; aiGenerated: boolean } | null;
+  verification: { status: "Pending" | "Accepted" | "Rejected" | "Overridden"; by?: User; at?: string; note?: string };
+  actual?: { excavationDays?: number; jcbCount?: number; totalDays?: number; note?: string; recordedBy?: User; at?: string };
+  prediction?: { _id: string; status: PredictionStatus; confidence?: number };
+  plan?: { created: number; existing: number; removed?: number; kept?: number };
+  createdAt: string;
+}
+
+export interface GeotechLearning {
+  observations: number;
+  siteFactor: number;
+  rates: Record<SoilClass, GeotechLearnedRate>;
+  scheduleFactor: number;
+  scheduleObservations: number;
+  priorWeight: number;
+}
+
+export interface GeotechList {
+  reports: GeotechReport[];
+  learning: GeotechLearning;
+  ai: { configured: boolean; quota?: { blocked: boolean; retryAt?: string; retryInSec?: number } };
+}
+
+// ---------- Plinth plan (site checklist after an estimate is accepted) ----------
+export interface PlinthItem {
+  _id: string;
+  text: string;
+  done: boolean;
+  source: "plan" | "added";
+  doneAt?: string;
+}
+
+export interface PlinthDay {
+  _id: string;
+  report: string;
+  project: string;
+  day: number;
+  date: string;
+  phaseKey: string;
+  phaseName: string;
+  dayInPhase: number;
+  phaseDays: number;
+  title: string;
+  planned?: { quantity: number; unit: string; label?: string };
+  crew: { trade: string; count: number }[];
+  machines: { name: string; count: number; kind: "machine" | "vehicle" }[];
+  items: PlinthItem[];
+  actualQuantity?: number;
+  note?: string;
+  status: "Pending" | "In Progress" | "Done";
+  completedAt?: string;
+}
+
+export interface PlinthPlan {
+  report: { _id: string; title: string; project?: { _id: string; name: string; code: string }; plinthAreaSqm?: number; acceptedBy?: string; acceptedAt?: string };
+  start: string;
+  end: string;
+  summary: { totalDays: number; doneDays: number; behindDays: number; items: number; itemsDone: number; percent: number; todayDay: number | null };
+  days: PlinthDay[];
+}

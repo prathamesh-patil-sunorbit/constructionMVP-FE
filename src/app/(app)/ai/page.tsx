@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { PageHeader } from "@/components/AppShell";
 import { api, useApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -178,6 +179,12 @@ export default function AiPage() {
                   running={running === agent.key}
                 />
               ))}
+              {user?.role !== "site_engineer" && (
+                <Card title="Geotech Agent" actions={<Link href="/geotech" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50">Open Plinth Estimate</Link>}>
+                  <p className="mb-2 text-xs text-slate-500">Reads a geotechnical report and estimates JCBs, days and crew to plinth level.</p>
+                  <p className="text-sm font-medium text-slate-800">Runs when a report is uploaded; its estimates appear under Predictions.</p>
+                </Card>
+              )}
             </div>
           )}
 

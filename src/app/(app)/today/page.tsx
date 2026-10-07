@@ -9,6 +9,7 @@ import { isManager } from "@/lib/types";
 import { PageHeader } from "@/components/AppShell";
 import { Badge, Button, Card, Empty, ErrorBox, HealthBadge, Loading, Modal, Progress, StatusBadge } from "@/components/ui";
 import { BlockerForm, ProgressUpdateForm } from "@/components/forms";
+import { PlinthTodayCard } from "@/components/plinth-plan";
 
 interface PlanItem {
   _id: string;
@@ -57,6 +58,7 @@ export default function TodayPage() {
       <ErrorBox message={error} />
       {loading && !data ? <Loading /> : data && (
         <div className="space-y-6">
+          <PlinthTodayCard />
           <Card title={<>Today <span className="font-normal text-slate-400">· {data.today.items.length} activities</span></>}>
             {data.today.items.length === 0 ? <Empty>No activities planned for today.</Empty> : (
               <div className="divide-y divide-slate-100">
