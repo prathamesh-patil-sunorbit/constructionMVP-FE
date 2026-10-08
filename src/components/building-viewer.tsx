@@ -17,7 +17,7 @@ const SLAB = "#ddd6cb";
 const FLOOR = "#d2b48c";
 const FRAME = "#5c4033";
 const DOOR = "#6b3a2a";
-const GLASS = "#8ecae6";
+const GLASS = "#6aa9d6";
 const LIGHT = "#fff6c8";
 const GRASS = "#5f8f3e";
 const ASPHALT = "#9a9388";
@@ -45,6 +45,10 @@ function appearance(type: string, wallColor: string, night: boolean, selected: b
       return { color: type === "parapet" ? PARAPET : wallColor || WALL, roughness: 0.92, metalness: 0.02, opacity: 1, emissive: "#000", emissiveIntensity: 0 };
     case "podium":
       return { color: "#3a3d44", roughness: 0.84, metalness: 0.06, opacity: 1, emissive: "#000", emissiveIntensity: 0 };
+    case "gold":
+      return { color: "#d3b27c", roughness: 0.45, metalness: 0.22, opacity: 1, emissive: "#000", emissiveIntensity: 0 };
+    case "pool":
+      return { color: "#38bdf8", roughness: 0.08, metalness: 0.2, opacity: 0.9, emissive: night ? "#0ea5e9" : "#000", emissiveIntensity: night ? 0.35 : 0 };
     case "fin":
       return { color: "#2b2e34", roughness: 0.62, metalness: 0.22, opacity: 1, emissive: "#000", emissiveIntensity: 0 };
     case "marker":
@@ -137,7 +141,7 @@ function appearance(type: string, wallColor: string, night: boolean, selected: b
 }
 
 function lookType(c: BuildingModel["components"][number]) {
-  if (c.subtype === "glass" || c.subtype === "fin" || c.subtype === "marker" || c.subtype === "lift") return c.subtype;
+  if (c.subtype === "glass" || c.subtype === "fin" || c.subtype === "marker" || c.subtype === "lift" || c.subtype === "gold" || c.subtype === "pool") return c.subtype;
   if (c.type === "furniture" && c.subtype) return c.subtype;
   if (c.skin === "podium" && (c.type === "wall" || c.type === "parapet" || c.type === "band" || c.type === "column")) return "podium";
   if (c.subtype === "cold" || c.subtype === "hot" || c.subtype === "drain" || c.subtype === "conduit" || c.subtype === "board" || c.subtype === "tile") return c.subtype;
@@ -661,6 +665,7 @@ function Part({
   const built = !fourD || p === null || p >= 8 || siteAlways;
   const ghost = fourD && p !== null && p < 100 && p >= 8 && !siteAlways;
   const look = appearance(lookType(c), wallColor, night, selected);
+  if (c.color && !selected) look.color = c.color;
   const shell = bim && (c.type === "wall" || c.type === "parapet");
   const opacity = !built ? 0 : shell ? 0.2 : ghost ? Math.max(0.4, (p || 0) / 100) : look.opacity;
   if (!built) return null;
