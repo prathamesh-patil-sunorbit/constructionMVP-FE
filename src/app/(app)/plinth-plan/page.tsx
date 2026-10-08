@@ -12,6 +12,18 @@ import {
   Check, MiniBar, PHASE_TONE, Ring, cx, currentDay, dayPercent, doneCount, isBehind, timing, toggleItem, usePlinthPlans,
 } from "@/components/plinth-plan";
 
+// Days the weather takes are marked so the engineer knows why the phase work is not on them.
+const WEATHER_BADGE: Record<string, { tone: string; text: string }> = {
+  rain: { tone: "blue", text: "Rain day" },
+  light: { tone: "blue", text: "Wet day" },
+  recovery: { tone: "amber", text: "Dry-out" },
+  buffer: { tone: "slate", text: "Weather buffer" },
+};
+function WeatherBadge({ kind }: { kind: string }) {
+  const b = WEATHER_BADGE[kind];
+  return b ? <Badge tone={b.tone}>{b.text}</Badge> : null;
+}
+
 export default function PlinthPlanPage() {
   const { user } = useAuth();
   const canEdit = isManager(user?.role) || user?.role === "site_engineer";
@@ -269,6 +281,7 @@ function DayDetail({ day, canEdit, onChange, onPrev, onNext }: {
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
             <Badge tone={PHASE_TONE[day.phaseKey] || "slate"}>{day.phaseName}</Badge>
+            {day.weather && <WeatherBadge kind={day.weather.kind} />}
             <span>day {day.dayInPhase} of {day.phaseDays} of this phase</span>
           </div>
         </div>
@@ -399,7 +412,7 @@ function UpNext({ plan, selectedId, onSelect }: { plan: PlinthPlan; selectedId: 
                 <button onClick={() => onSelect(d._id)} className="w-full rounded-xl border border-slate-200 p-3 text-left transition hover:border-slate-400 hover:bg-slate-50">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-semibold text-slate-500">Day {d.day} · {fmtWeekday(d.date)}</span>
-                    <Badge tone={PHASE_TONE[d.phaseKey] || "slate"}>{d.phaseName}</Badge>
+                    <span className="flex gap-1">{d.weather && <WeatherBadge kind={d.weather.kind} />}<Badge tone={PHASE_TONE[d.phaseKey] || "slate"}>{d.phaseName}</Badge></span>
                   </div>
                   <p className="mt-1 line-clamp-2 text-sm text-slate-800">{d.title}</p>
                   {d.planned && <p className="mt-1 text-xs text-slate-500">Target {d.planned.quantity} {d.planned.unit}</p>}

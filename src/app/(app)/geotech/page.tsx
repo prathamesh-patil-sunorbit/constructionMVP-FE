@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { useState } from "react";
 import { API_URL, api, useApi } from "@/lib/api";
-import type { GeotechEstimate, GeotechList, GeotechReport, Project, SoilClass } from "@/lib/types";
+import type { GeotechEstimate, GeotechList, GeotechReport, GeotechWeather, Project, SoilClass, WeatherKind } from "@/lib/types";
 import { Badge, Button, ErrorBox, Input, Loading, Select } from "@/components/ui";
 import { AiMark, CalculatedMark } from "@/components/ai";
 import { DailyWorkPlan, Dropzone, EquipmentCards, Icon, PhaseCards, PhaseTimeline, SoilProfile, Spinner, type IconName } from "@/components/geotech";
-import { fmtDateTime, todayInput } from "@/lib/format";
+import { fmtDate, fmtDateTime, fmtWeekday, todayInput } from "@/lib/format";
 import { useAuth } from "@/lib/auth";
 import { canAccess } from "@/lib/navigation";
 
@@ -144,6 +144,7 @@ function EstimateForm({ projectId, configured, onCreated }: { projectId: string;
   const [file, setFile] = useState<File | null>(null);
   const [area, setArea] = useState("");
   const [depth, setDepth] = useState("");
+  const [weather, setWeather] = useState<File | null>(null);
   const [busy, setBusy] = useState<"upload" | "sample" | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -152,6 +153,7 @@ function EstimateForm({ projectId, configured, onCreated }: { projectId: string;
     if (area && !(Number(area) > 0)) return setErr("Plinth area must be more than 0 m².");
     if (mode === "upload" && !file) return setErr("Choose the geotechnical report (PDF or photo).");
     if (file && file.size > 12 * 1024 * 1024 && mode === "upload") return setErr("The file is larger than 12 MB.");
+    if (weather && weather.size > 12 * 1024 * 1024) return setErr("The weather report is larger than 12 MB.");
     setBusy(mode);
     try {
       let report: GeotechReport;
@@ -161,12 +163,19 @@ function EstimateForm({ projectId, configured, onCreated }: { projectId: string;
         body.append("project", projectId);
         if (area) body.append("plinthAreaSqm", area);
         if (depth) body.append("depthM", depth);
+        if (weather) body.append("weather", weather);
         report = await api<GeotechReport>("/geotech", { method: "POST", body });
       } else {
         report = await api<GeotechReport>("/geotech/sample", {
           method: "POST", json: { project: projectId, plinthAreaSqm: area ? Number(area) : null, depthM: depth ? Number(depth) : null },
         });
+        if (weather) {
+          const body = new FormData();
+          body.append("file", weather);
+          report = await api<GeotechReport>(`/geotech/${report._id}/weather`, { method: "POST", body });
+        }
       }
+      setWeather(null);
       onCreated(report);
     } catch (e) {
       setErr((e as Error).message);
@@ -188,6 +197,21 @@ function EstimateForm({ projectId, configured, onCreated }: { projectId: string;
             <span className="text-xs font-medium text-slate-600">Excavation depth <span className="font-normal text-slate-400">(optional)</span></span>
             <UnitInput unit="m" type="number" min="0.3" max="15" step="0.1" value={depth} onChange={(e) => setDepth(e.target.value)} placeholder="from report, else 1.5" />
           </label>
+          <div className="space-y-1">
+            <span className="block text-xs font-medium text-slate-600">Weather report <span className="font-normal text-slate-400">(optional, for the rain buffer)</span></span>
+            <div className="flex items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm">
+              <Icon name="rain" />
+              <span className={cx("min-w-0 flex-1 truncate", weather ? "text-slate-800" : "text-slate-400")}>{weather ? weather.name : "IMD or site forecast, PDF or photo"}</span>
+              {weather ? (
+                <button type="button" className="text-xs text-slate-500 underline" disabled={!!busy} onClick={() => setWeather(null)}>remove</button>
+              ) : (
+                <label className="cursor-pointer text-xs font-medium text-slate-700 underline">
+                  choose
+                  <input type="file" accept="application/pdf,image/*" className="hidden" disabled={!!busy} onChange={(ev) => { setWeather(ev.target.files?.[0] ?? null); ev.target.value = ""; }} />
+                </label>
+              )}
+            </div>
+          </div>
           <div className="mt-auto flex flex-col gap-2 pt-1 sm:flex-row">
             <Button type="submit" className="flex-1 py-2" disabled={!!busy || !projectId || configured === false}>
               {busy === "upload" ? <><Spinner /> Reading report…</> : <><Icon name="sparkles" /> Run estimate</>}
@@ -263,9 +287,10 @@ function ReportView({ report, learning, onUpdated, onCreated }: {
     <div className="space-y-5">
       <ReportTitle report={report} />
       <SiteSummary report={report} onCreated={onCreated} />
-      <Kpis estimate={e} />
+      <Kpis estimate={e} weather={report.weather} />
       <Verification report={report} onUpdated={onUpdated} />
       {e.warnings.length > 0 && <Warnings warnings={e.warnings} />}
+      <WeatherPanel report={report} onUpdated={onUpdated} />
 
       <div className="grid gap-5 xl:grid-cols-[1.1fr_1fr]">
         <Panel title="Soil layer view" icon="layers" actions={<span className="text-[11px] text-slate-400">hover a layer for the report text</span>}>
@@ -304,7 +329,7 @@ function ReportView({ report, learning, onUpdated, onCreated }: {
       </Panel>
 
       <Panel title="Phase timeline" icon="calendar" actions={<CalculatedMark title="Five sequential phases; calendar days are the sum" />}>
-        <PhaseTimeline estimate={e} />
+        <PhaseTimeline estimate={withWeather(e, report.weather)} />
       </Panel>
 
       <Panel
@@ -380,13 +405,30 @@ function Kpi({ icon, photo, label, value, sub, accent }: { icon: IconName; photo
   );
 }
 
-function Kpis({ estimate: e }: { estimate: GeotechEstimate }) {
+// Days to plinth including the rain buffer, when there is one.
+const plinthDays = (e: GeotechEstimate, w?: GeotechWeather | null) => w?.totalDays ?? e.totals.calendarDays;
+
+// The estimate with each phase stretched by its weather days, for the timeline.
+function withWeather(e: GeotechEstimate, w?: GeotechWeather | null): GeotechEstimate {
+  if (!w) return e;
+  let day = 0;
+  const phases = e.phases.map((p) => {
+    const days = w.phases.find((x) => x.key === p.key)?.days ?? p.days;
+    const out = { ...p, days, startDay: day, endDay: day + days };
+    day += days;
+    return out;
+  });
+  return { ...e, phases, totals: { ...e.totals, calendarDays: day } };
+}
+
+function Kpis({ estimate: e, weather: w }: { estimate: GeotechEstimate; weather?: GeotechWeather | null }) {
   const t = e.totals;
   const busiest = e.phases.find((p) => p.workerTotal === t.peakWorkers)?.name;
+  const phases = `${e.phases.filter((p) => !p.insufficientData).length} phases in sequence`;
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi accent icon="calendar" label={t.partial ? "Days to plinth (at least)" : "Days to plinth"} value={t.calendarDays} sub={`${e.phases.filter((p) => !p.insufficientData).length} phases in sequence`} />
+        <Kpi accent icon="calendar" label={t.partial ? "Days to plinth (at least)" : "Days to plinth"} value={plinthDays(e, w)} sub={w ? `${phases} · incl. ${w.extraDays} for rain` : phases} />
         <Kpi icon="digger" photo="/equipment/jcb.jpg" label="JCBs" value={t.peakJcbs} sub={`${e.excavation.days} days of excavation`} />
         <Kpi icon="users" label="Peak workers" value={t.peakWorkers} sub={busiest ? `during ${busiest.toLowerCase()}` : undefined} />
         <Kpi icon="truck" photo="/equipment/tipper.jpg" label="Tippers" value={t.tippers} sub={`${e.excavation.looseVolumeM3} m³ to haul`} />
@@ -537,7 +579,7 @@ function siteSentence(report: GeotechReport) {
     const below = f.groundwaterDepthM !== null && f.groundwaterDepthM < e.inputs.depthM;
     parts.push(`The excavation ${below ? "goes below" : "reaches"} the water table, so a dewatering pump is needed.`);
   }
-  parts.push(`${e.totals.partial ? "At least " : ""}${e.totals.calendarDays} working days to plinth with ${e.totals.peakJcbs} JCB${e.totals.peakJcbs === 1 ? "" : "s"} and up to ${e.totals.peakWorkers} workers.`);
+  parts.push(`${e.totals.partial ? "At least " : ""}${plinthDays(e, report.weather)} days to plinth${report.weather?.extraDays ? ` (including ${report.weather.extraDays} for rain)` : ""} with ${e.totals.peakJcbs} JCB${e.totals.peakJcbs === 1 ? "" : "s"} and up to ${e.totals.peakWorkers} workers.`);
   return parts.join(" ");
 }
 
@@ -666,6 +708,157 @@ function NotRead({ report, onCreated }: { report: GeotechReport; onCreated: (r: 
   );
 }
 
+// ---------------------------------------------------------------------------
+// Weather: rain buffer on the schedule
+// ---------------------------------------------------------------------------
+
+const DAY_KIND: Record<WeatherKind, { cell: string; label: string }> = {
+  work: { cell: "bg-emerald-400", label: "Working day" },
+  light: { cell: "bg-sky-300", label: "Wet day, slower" },
+  rain: { cell: "bg-sky-600", label: "Rain, work stopped" },
+  recovery: { cell: "bg-amber-400", label: "Dry-out after rain" },
+  buffer: { cell: "bg-slate-300", label: "Buffer for expected rain" },
+};
+
+const rainIcon = (mm: number): IconName => (mm >= 10 ? "rain" : mm >= 2.5 ? "cloud" : "sun");
+
+function WeatherPanel({ report, onUpdated }: { report: GeotechReport; onUpdated: (r: GeotechReport) => void }) {
+  const w = report.weather;
+  const up = report.weatherUpload;
+  const [busy, setBusy] = useState<"upload" | "refresh" | "remove" | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const call = async (kind: "upload" | "refresh" | "remove", fn: () => Promise<GeotechReport>) => {
+    setBusy(kind);
+    setErr(null);
+    setMsg(null);
+    try {
+      const res = await fn();
+      if (res.plan?.replanned) setMsg(`Site plan updated: ${res.plan.days} days.`);
+      else if (res.plan?.kept) setMsg("The site plan already has work recorded, so it was not changed. The new buffer is shown here.");
+      onUpdated(res);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const upload = (file: File) => {
+    if (file.size > 12 * 1024 * 1024) return setErr("The file is larger than 12 MB.");
+    const body = new FormData();
+    body.append("file", file);
+    call("upload", () => api<GeotechReport>(`/geotech/${report._id}/weather`, { method: "POST", body }));
+  };
+  const refresh = () => call("refresh", () => api<GeotechReport>(`/geotech/${report._id}/weather/refresh`, { method: "POST" }));
+  const remove = () => call("remove", () => api<GeotechReport>(`/geotech/${report._id}/weather`, { method: "DELETE" }));
+
+  const known = w?.known.filter((d) => d.date >= (w.start as string).slice(0, 10)).slice(0, 16) ?? [];
+  const accepted = report.verification.status === "Accepted";
+
+  return (
+    <Panel
+      title="Weather & rain buffer"
+      icon="rain"
+      actions={<span className="flex items-center gap-2"><CalculatedMark title="Rain days from the forecast or your weather report; the days lost are calculated by the rules" />
+        <Button variant="secondary" className="py-1 text-xs" disabled={!!busy} onClick={refresh}>{busy === "refresh" ? <><Spinner /> Updating…</> : <><Icon name="retry" /> Refresh forecast</>}</Button></span>}
+    >
+      {w ? (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
+            <div>
+              <div className="text-3xl font-semibold tabular-nums">{w.extraDays > 0 ? `+${w.extraDays}` : "0"} <span className="text-base font-medium text-slate-500">days for rain</span></div>
+              <div className="text-xs text-slate-500">{w.totalDays} days to plinth · {fmtDate(w.start)} → {fmtDate(w.end)}{accepted ? "" : " if started today; worked out again for the start date you accept with"}</div>
+            </div>
+            <div className="text-xs text-slate-500">
+              <div>{w.location.name}{w.location.source === "rules" ? " (default site)" : ""}</div>
+              <div>{up?.status === "Read" ? `Uploaded report for ${up.days?.length ?? 0} days, then ` : ""}{w.forecast.error ? <span className="text-amber-700">{w.forecast.error}</span> : `forecast to ${fmtDate(w.forecast.to)}`}, then monthly averages</div>
+            </div>
+          </div>
+
+          {known.length > 0 && (
+            <div>
+              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Rain in the coming days</div>
+              <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-8 lg:grid-cols-[repeat(16,minmax(0,1fr))]">
+                {known.map((d) => (
+                  <div key={d.date} title={`${fmtDate(d.date)}: ${d.rainMm} mm${d.probability != null ? `, ${d.probability}% chance` : ""} (${d.source === "upload" ? "your weather report" : "forecast"})`}
+                    className={cx("rounded-lg px-1 py-1.5 text-center ring-1 ring-inset", d.rainMm >= 10 ? "bg-sky-100 ring-sky-300" : d.rainMm >= 2.5 ? "bg-sky-50 ring-sky-200" : "bg-slate-50 ring-slate-200")}>
+                    <div className="text-[10px] text-slate-500">{fmtWeekday(d.date)}</div>
+                    <div className={cx("my-0.5 flex justify-center", d.rainMm >= 2.5 ? "text-sky-700" : "text-amber-500")}><Icon name={rainIcon(d.rainMm)} /></div>
+                    <div className="text-[11px] font-medium tabular-nums">{d.rainMm} mm</div>
+                    {d.source === "upload" && <div className="text-[9px] font-semibold uppercase text-violet-600">report</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Day by day</div>
+            <div className="flex flex-wrap gap-0.5">
+              {w.schedule.map((x, i) => (
+                <span key={i} title={`Day ${i + 1} · ${fmtDate(x.date)} · ${x.phaseName}: ${x.note ?? DAY_KIND[x.kind].label}`} className={cx("h-4 w-2.5 rounded-sm", DAY_KIND[x.kind].cell)} />
+              ))}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+              {(Object.keys(DAY_KIND) as WeatherKind[]).map((k) => <span key={k} className="flex items-center gap-1.5"><span className={cx("h-2.5 w-2.5 rounded-sm", DAY_KIND[k].cell)} />{DAY_KIND[k].label}</span>)}
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+            {w.phases.map((p) => (
+              <div key={p.key} className={cx("rounded-xl px-3 py-2 ring-1 ring-inset", p.extraDays > 0 ? "bg-sky-50/60 ring-sky-200" : "bg-slate-50 ring-slate-200")}>
+                <div className="text-xs font-medium text-slate-600">{p.name}</div>
+                <div className="text-lg font-semibold tabular-nums">{p.days} days{p.extraDays > 0 && <span className="ml-1 text-xs font-medium text-sky-700">+{p.extraDays}</span>}</div>
+                <div className="text-[11px] text-slate-500">
+                  {[p.rainDays && `${p.rainDays} rain`, p.lightDays && `${p.lightDays} wet`, p.recoveryDays && `${p.recoveryDays} dry-out`, p.bufferDays && `${p.bufferDays} buffer`].filter(Boolean).join(" · ") || "no rain loss"}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {w.warnings.length > 0 && <Warnings warnings={w.warnings} />}
+
+          <details className="text-xs text-slate-600">
+            <summary className="cursor-pointer select-none font-medium text-slate-500 hover:text-slate-900">How the rain buffer is worked out</summary>
+            <ul className="mt-2 list-disc space-y-1 pl-5">{w.basis.map((b, i) => <li key={i}>{b}</li>)}</ul>
+          </details>
+        </div>
+      ) : (
+        <p className="text-sm text-slate-500">No rain buffer yet. Use Refresh forecast to work it out.</p>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-4 py-3">
+        <Icon name="upload" />
+        <div className="min-w-0 flex-1 text-sm">
+          {up?.file ? (
+            <>
+              <span className="font-medium">{up.file.originalName}</span>
+              <span className={cx("ml-2 text-xs", up.status === "Read" ? "text-emerald-700" : "text-red-700")}>
+                {up.status === "Read" ? `read: rain for ${up.days?.length ?? 0} days${up.location ? ` · ${up.location}` : ""}` : up.reason}
+              </span>
+            </>
+          ) : (
+            <span className="text-slate-600">Have a weather report for the site (IMD, client or consultant)? Upload it. Its rain figures replace the forecast on the days it covers.</span>
+          )}
+        </div>
+        <label className={cx("inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50", busy && "pointer-events-none opacity-50")}>
+          {busy === "upload" ? <><Spinner /> Reading…</> : <><Icon name="upload" /> {up?.file ? "Replace" : "Upload weather report"}</>}
+          <input type="file" accept="application/pdf,image/*" className="hidden" disabled={!!busy} onChange={(ev) => { const f = ev.target.files?.[0]; ev.target.value = ""; if (f) upload(f); }} />
+        </label>
+        {up?.file && (
+          <>
+            <a href={`${API_URL}${up.file.url}`} target="_blank" rel="noreferrer" className="text-sm text-slate-600 underline">Open</a>
+            <Button variant="ghost" className="py-1 text-sm" disabled={!!busy} onClick={remove}>{busy === "remove" ? <Spinner /> : "Remove"}</Button>
+          </>
+        )}
+      </div>
+      {msg && <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{msg}</p>}
+      {err && <div className="mt-3"><ErrorBox message={err} /></div>}
+    </Panel>
+  );
+}
+
 const STATUS_STYLE: Record<string, { box: string; icon: IconName; title: string }> = {
   Pending: { box: "border-amber-200 bg-amber-50", icon: "info", title: "Awaiting approval" },
   Accepted: { box: "border-emerald-200 bg-emerald-50", icon: "check", title: "Accepted" },
@@ -682,7 +875,7 @@ function Verification({ report, onUpdated }: { report: GeotechReport; onUpdated:
   const [published, setPublished] = useState<NonNullable<GeotechReport["plan"]> | null>(null);
   const v = report.verification;
   const s = STATUS_STYLE[v.status];
-  const days = report.estimate?.phases.filter((p) => !p.insufficientData).reduce((n, p) => n + p.days, 0) ?? 0;
+  const days = report.weather?.totalDays ?? report.estimate?.phases.filter((p) => !p.insufficientData).reduce((n, p) => n + p.days, 0) ?? 0;
 
   const decide = async (status: "Accepted" | "Rejected") => {
     setBusy(true);
@@ -725,10 +918,10 @@ function Verification({ report, onUpdated }: { report: GeotechReport; onUpdated:
             <Button type="submit" disabled={busy}>{busy ? <Spinner /> : <Icon name="check" />} Accept &amp; send to site</Button>
             <Button type="button" variant="secondary" disabled={busy} onClick={() => decide("Rejected")}>Reject</Button>
           </div>
-          {days > 0 && <p className="text-xs text-slate-600 md:col-span-3">Accepting sends a {days}-day checklist to the site engineers, with the crew and machines for each day. They tick items off and record real progress.</p>}
+          {days > 0 && <p className="text-xs text-slate-600 md:col-span-3">Accepting sends a {report.weather ? "" : `${days}-day `}checklist to the site engineers, with the crew and machines for each day{report.weather ? ", and rain days worked out again for the start date you pick" : ""}. They tick items off and record real progress.</p>}
         </form>
       )}
-      {published && published.created > 0 && (
+      {published && (published.created ?? 0) > 0 && (
         <p className="mt-2 flex items-center gap-2 rounded-lg bg-white/70 px-3 py-2 text-sm text-emerald-800"><Icon name="check" className="h-4 w-4" /> {published.created}-day plan sent to site engineers.</p>
       )}
       {err && <div className="mt-2"><ErrorBox message={err} /></div>}

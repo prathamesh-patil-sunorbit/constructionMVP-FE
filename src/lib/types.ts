@@ -790,6 +790,24 @@ export interface GeotechEstimate {
   confidenceBasis: string[];
 }
 
+export interface WeatherDay { date: string; rainMm: number; probability: number | null; source: "forecast" | "upload"; fromWording?: boolean }
+export type WeatherKind = "work" | "light" | "rain" | "recovery" | "buffer";
+export interface GeotechWeather {
+  start: string;
+  end: string;
+  dryDays: number;
+  totalDays: number;
+  extraDays: number;
+  phases: { key: string; name: string; dryDays: number; days: number; extraDays: number; rainDays: number; lightDays: number; recoveryDays: number; bufferDays: number; expectedLoss: number }[];
+  schedule: { date: string; phaseKey: string; phaseName: string; kind: WeatherKind; rainMm: number | null; probability: number | null; source: "forecast" | "upload" | "normal"; note: string | null }[];
+  warnings: GeotechEstimate["warnings"];
+  basis: string[];
+  location: { name: string; latitude: number; longitude: number; source: string };
+  forecast: { fetchedAt: string | null; error: string | null; from: string | null; to: string | null };
+  known: WeatherDay[];
+  computedAt: string;
+}
+
 export interface GeotechReport {
   _id: string;
   project: string;
@@ -803,7 +821,17 @@ export interface GeotechReport {
   verification: { status: "Pending" | "Accepted" | "Rejected" | "Overridden"; by?: User; at?: string; note?: string };
   actual?: { excavationDays?: number; jcbCount?: number; totalDays?: number; note?: string; recordedBy?: User; at?: string };
   prediction?: { _id: string; status: PredictionStatus; confidence?: number };
-  plan?: { created: number; existing: number; removed?: number; kept?: number };
+  plan?: { created?: number; existing?: number; removed?: number; kept?: number; replanned?: boolean; days?: number };
+  weather?: GeotechWeather | null;
+  weatherUpload?: {
+    file?: { originalName: string; url: string; mimetype: string; size: number };
+    status?: "Read" | "Not read";
+    reason?: string;
+    title?: string | null;
+    location?: string | null;
+    days?: WeatherDay[];
+    at?: string;
+  } | null;
   createdAt: string;
 }
 
@@ -842,6 +870,7 @@ export interface PlinthDay {
   dayInPhase: number;
   phaseDays: number;
   title: string;
+  weather?: { kind: WeatherKind; rainMm?: number; note?: string };
   planned?: { quantity: number; unit: string; label?: string };
   crew: { trade: string; count: number }[];
   machines: { name: string; count: number; kind: "machine" | "vehicle" }[];
