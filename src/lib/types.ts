@@ -626,7 +626,7 @@ export interface BuildingModel {
   components: {
     id: string; type: string; category: string; tower: string; floorName: string | null; floorIndex: number;
     position: [number, number, number]; size: [number, number, number];
-    label: string; activityIds: string[]; side?: string; subtype?: string; skin?: string; unit?: string | null;
+    label: string; activityIds: string[]; color?: string; side?: string; subtype?: string; skin?: string; unit?: string | null;
     rotation?: [number, number, number]; callout?: string; engineering?: boolean;
   }[];
   activities: {

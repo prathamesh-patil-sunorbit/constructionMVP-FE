@@ -361,10 +361,19 @@ function Foundation({ type, x, w, y }: { type?: FoundationType; x: number; w: nu
 // Phase timeline + workers per day (one shared day axis)
 // ---------------------------------------------------------------------------
 
+// One colour per phase, shared by the timeline, the worker chart and the daily plan.
+const PHASE_COLORS: Record<string, string> = { excavation: "#d97706", pcc: "#78716c", foundation: "#ea580c", plinthBeam: "#0284c7", backfill: "#059669" };
+const PHASE_FALLBACK = ["#7c3aed", "#db2777", "#0d9488", "#4f46e5"];
+export const phaseColor = (p: GeotechPhase, i: number) => PHASE_COLORS[p.key] || PHASE_FALLBACK[i % PHASE_FALLBACK.length];
+
 export function PhaseTimeline({ estimate }: { estimate: GeotechEstimate }) {
   const total = Math.max(1, estimate.totals.calendarDays);
   const phases = estimate.phases;
   const pct = (d: number) => `${(d / total) * 100}%`;
+  const colorOf = (name: string) => {
+    const i = phases.findIndex((ph) => ph.name === name);
+    return i >= 0 ? phaseColor(phases[i], i) : "#cbd5e1";
+  };
   const perDay = Array.from({ length: total }, (_, d) => {
     const p = phases.find((ph) => !ph.insufficientData && d >= ph.startDay && d < ph.endDay);
     return { day: d + 1, phase: p?.name ?? "-", workers: p?.workerTotal ?? 0 };
@@ -375,48 +384,74 @@ export function PhaseTimeline({ estimate }: { estimate: GeotechEstimate }) {
   const ticks = Array.from(new Set([0, ...phases.map((p) => p.endDay)]))
     .filter((d) => d <= total)
     .reduce<number[]>((kept, d) => (kept.length && (d - kept[kept.length - 1]) / total < 0.05 && d !== total ? kept : [...kept, d]), []);
-  const grid = "grid grid-cols-[6.5rem_1fr] gap-3 sm:grid-cols-[8rem_1fr]";
+  const grid = "grid grid-cols-[7.5rem_1fr] gap-4 sm:grid-cols-[10rem_1fr]";
 
   return (
-    <div className="space-y-2">
-      {phases.map((p, i) => (
-        <div key={p.key} className={cx(grid, "items-center")}>
-          <span className="flex items-center gap-2 truncate text-sm text-slate-700">
-            <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-slate-100 text-[10px] font-semibold text-slate-600">{i + 1}</span>
-            <span className="truncate">{p.name}</span>
-          </span>
-          <div className="relative h-7 rounded-md bg-slate-50 ring-1 ring-inset ring-slate-100">
-            {p.insufficientData ? (
-              <span className="absolute inset-y-1 flex items-center rounded border border-dashed border-amber-400 bg-amber-50 px-2 text-[11px] font-medium text-amber-800" style={{ left: pct(p.startDay) }}>
-                not estimated
-              </span>
-            ) : (
-              <div
-                className="absolute inset-y-1 flex items-center justify-end overflow-hidden rounded bg-slate-800 px-1.5 text-[11px] font-semibold text-white"
-                style={{ left: pct(p.startDay), width: `max(1.25rem, calc(${pct(p.days)} - 2px))` }}
-                title={`${p.name}: day ${p.startDay + 1}–${p.endDay}, ${p.days} days, ${p.workerTotal} workers`}
-              >
-                {p.days / total > 0.06 ? `${p.days}d` : ""}
+    <div>
+      <div className="mb-5 flex flex-wrap gap-2">
+        <span className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white"><Icon name="calendar" className="h-3.5 w-3.5 text-amber-300" />{total} calendar days</span>
+        <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-200"><Icon name="users" className="h-3.5 w-3.5" />Peak {peak} workers · {peakPhase}</span>
+      </div>
+
+      <div className="relative">
+        {/* vertical guides at the phase boundaries, behind both charts */}
+        <div className={cx(grid, "pointer-events-none absolute inset-0")}>
+          <span />
+          <div className="relative">{ticks.map((d) => <span key={d} className="absolute inset-y-0 w-px bg-slate-200/70" style={{ left: pct(d) }} />)}</div>
+        </div>
+
+        <div className="relative space-y-2.5">
+          {phases.map((p, i) => {
+            const color = phaseColor(p, i);
+            const wide = p.days / total > 0.08;
+            return (
+              <div key={p.key} className={cx(grid, "items-center")}>
+                <span className="flex min-w-0 items-center gap-2.5">
+                  <span className="grid h-6 w-6 shrink-0 place-items-center rounded-lg text-[11px] font-bold text-white" style={{ background: color }}>{i + 1}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium text-slate-800">{p.name}</span>
+                    {!p.insufficientData && <span className="block text-[11px] tabular-nums text-slate-400">day {p.startDay + 1}–{p.endDay}</span>}
+                  </span>
+                </span>
+                <div className="relative h-9">
+                  {p.insufficientData ? (
+                    <span className="absolute inset-y-1.5 flex items-center rounded-full border border-dashed border-amber-400 bg-amber-50 px-3 text-[11px] font-medium text-amber-800" style={{ left: pct(p.startDay) }}>not estimated</span>
+                  ) : (
+                    <>
+                      <div
+                        className="absolute inset-y-1 flex items-center justify-end rounded-full px-3 text-xs font-bold text-white shadow-sm"
+                        style={{ left: pct(p.startDay), width: `max(1.1rem, calc(${pct(p.days)} - 2px))`, background: `linear-gradient(90deg, ${color}cc, ${color})` }}
+                        title={`${p.name}: day ${p.startDay + 1}–${p.endDay}, ${p.days} days, ${p.workerTotal} workers`}
+                      >
+                        {wide ? `${p.days}d` : ""}
+                      </div>
+                      {!wide && <span className="absolute inset-y-0 flex items-center pl-2 text-xs font-bold tabular-nums" style={{ left: `calc(${pct(p.startDay)} + max(1.25rem, ${pct(p.days)}) + 4px)`, color }}>{p.days}d</span>}
+                    </>
+                  )}
+                </div>
               </div>
-            )}
+            );
+          })}
+        </div>
+
+        <div className={cx(grid, "relative items-end pt-7")}>
+          <span className="pb-1 text-xs leading-tight text-slate-500"><span className="font-medium text-slate-700">Workers on site</span><br /><span className="text-slate-400">per day, coloured by phase</span></span>
+          <div className="flex h-24 items-end gap-px border-b border-slate-300">
+            {perDay.map((d) => {
+              const isPeak = d.workers === peak;
+              return (
+                <div
+                  key={d.day}
+                  className={cx("flex-1 rounded-t-sm transition-opacity hover:opacity-100", isPeak ? "opacity-100" : "opacity-45")}
+                  style={{ height: `${Math.max(3, (d.workers / peak) * 100)}%`, background: isPeak ? "#f59e0b" : colorOf(d.phase) }}
+                  title={`Day ${d.day}: ${d.phase}, ${d.workers} workers`}
+                />
+              );
+            })}
           </div>
         </div>
-      ))}
-
-      <div className={cx(grid, "items-end pt-4")}>
-        <span className="pb-1 text-xs leading-tight text-slate-500">Workers on site<br /><span className="text-slate-400">peak {peak} · {peakPhase}</span></span>
-        <div className="flex h-20 items-end gap-px border-b border-slate-200">
-          {perDay.map((d) => (
-            <div
-              key={d.day}
-              className={cx("flex-1 rounded-t-sm transition-colors hover:bg-slate-800", d.workers === peak ? "bg-amber-500" : "bg-slate-300")}
-              style={{ height: `${(d.workers / peak) * 100}%` }}
-              title={`Day ${d.day}: ${d.phase}, ${d.workers} workers`}
-            />
-          ))}
-        </div>
       </div>
-      <div className={grid}>
+      <div className={cx(grid, "mt-1")}>
         <span />
         <div className="relative h-4 text-[10px] tabular-nums text-slate-400">
           {ticks.map((d) => <span key={d} className="absolute -translate-x-1/2" style={{ left: pct(d) }}>{d === total ? `${d} days` : d}</span>)}
@@ -588,55 +623,57 @@ function dayLine(p: GeotechPhase, dayInPhase: number) {
 
 export function DailyWorkPlan({ phases }: { phases: GeotechPhase[] }) {
   return (
-    <div className="max-h-[34rem] overflow-y-auto rounded-xl border border-slate-200">
-      <table className="w-full text-left text-sm">
-        <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-          <tr>
-            <th className="px-3 py-2 font-medium">Day</th>
-            <th className="px-3 py-2 font-medium">What happens</th>
-            <th className="px-3 py-2 font-medium">Crew on site</th>
-            <th className="px-3 py-2 font-medium">Machinery</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {phases.map((p) => {
-            if (p.insufficientData) {
-              return (
-                <tr key={p.key} className="bg-amber-50/60">
-                  <td colSpan={4} className="px-3 py-2 text-xs text-amber-800"><span className="font-semibold">{p.name}:</span> {p.reason}</td>
-                </tr>
-              );
-            }
-            const equipment = [
-              ...p.machines.map((m) => ({ ...m, kind: "machine" as const })),
-              ...p.vehicles.map((v) => ({ ...v, kind: "vehicle" as const })),
-            ];
-            return (
-              <Fragment key={p.key}>
-                <tr className="bg-slate-50">
-                  <td colSpan={4} className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    {p.name} · day {p.startDay + 1}–{p.endDay} · {p.days} day{p.days === 1 ? "" : "s"}
-                  </td>
-                </tr>
-                {Array.from({ length: p.days }, (_, i) => i + 1).map((d) => (
-                  <tr key={d} className="align-top">
-                    <td className="px-3 py-2 font-medium tabular-nums text-slate-700">{p.startDay + d}</td>
-                    <td className="px-3 py-2 text-slate-700">{dayLine(p, d)}</td>
-                    <td className="px-3 py-2 text-xs text-slate-600">{p.workers.map((w) => `${w.count} ${w.trade}`).join(", ") || "—"}</td>
-                    <td className="px-3 py-2">
-                      {equipment.length ? (
-                        <div className="flex flex-wrap gap-1">
-                          {equipment.map((m) => <EquipmentTile key={m.name} name={m.name} count={m.count} kind={m.kind} size="sm" />)}
+    <div className="max-h-[38rem] space-y-3 overflow-y-auto pr-1">
+      {phases.map((p, pi) => {
+        if (p.insufficientData) {
+          return (
+            <div key={p.key} className="rounded-2xl border border-dashed border-amber-300 bg-amber-50/60 px-4 py-3 text-xs text-amber-800"><span className="font-semibold">{p.name}:</span> {p.reason}</div>
+          );
+        }
+        const color = phaseColor(p, pi);
+        const equipment = [
+          ...p.machines.map((m) => ({ ...m, kind: "machine" as const })),
+          ...p.vehicles.map((v) => ({ ...v, kind: "vehicle" as const })),
+        ];
+        return (
+          <details key={p.key} open={pi === 0} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 [&::-webkit-details-marker]:hidden" style={{ background: `linear-gradient(90deg, ${color}1f, transparent 70%)` }}>
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl text-sm font-bold text-white" style={{ background: color }}>{pi + 1}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-slate-900">{p.name}</span>
+                <span className="block text-xs tabular-nums text-slate-500">Day {p.startDay + 1}–{p.endDay} · {p.days} day{p.days === 1 ? "" : "s"}{p.quantity ? ` · ${round1(p.quantity.value)} ${p.quantity.unit}` : ""}</span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200"><Icon name="users" className="h-3.5 w-3.5 text-slate-400" />{p.workerTotal} workers</span>
+              <span className="flex gap-1">{equipment.map((m) => <EquipmentTile key={m.name} name={m.name} count={m.count} kind={m.kind} size="sm" />)}</span>
+              <svg viewBox="0 0 20 20" className="h-4 w-4 text-slate-400 transition group-open:rotate-180" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 8l5 5 5-5" /></svg>
+            </summary>
+            <ol className="divide-y divide-slate-100 border-t border-slate-100">
+              {Array.from({ length: p.days }, (_, i) => i + 1).map((d) => {
+                const done = p.quantity ? Math.min(100, Math.round((d / p.days) * 100)) : null;
+                return (
+                  <li key={d} className="grid grid-cols-[3rem_1fr] gap-x-3 gap-y-2 px-4 py-3 md:grid-cols-[3rem_1fr_17rem]">
+                    <span className="grid h-9 w-9 place-items-center rounded-full text-xs font-bold tabular-nums ring-2" style={{ color, boxShadow: `inset 0 0 0 1px ${color}33`, background: `${color}14` }}>{p.startDay + d}</span>
+                    <div className="min-w-0">
+                      <p className="text-[13px] leading-snug text-slate-700">{dayLine(p, d)}</p>
+                      {done !== null && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <span className="h-1.5 w-40 overflow-hidden rounded-full bg-slate-100"><span className="block h-full rounded-full" style={{ width: `${done}%`, background: color }} /></span>
+                          <span className="text-[11px] tabular-nums text-slate-400">{done}%</span>
                         </div>
-                      ) : <span className="text-xs text-slate-400">—</span>}
-                    </td>
-                  </tr>
-                ))}
-              </Fragment>
-            );
-          })}
-        </tbody>
-      </table>
+                      )}
+                    </div>
+                    <div className="col-start-2 flex flex-wrap content-start gap-1 md:col-start-3">
+                      {p.workers.map((w) => (
+                        <span key={w.trade} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600"><b className="tabular-nums text-slate-900">{w.count}</b>{w.trade}</span>
+                      ))}
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </details>
+        );
+      })}
     </div>
   );
 }
@@ -658,10 +695,10 @@ export function PhaseCards({ phases }: { phases: GeotechPhase[] }) {
   return (
     <ol className="space-y-3">
       {phases.map((p, i) => (
-        <li key={p.key} className={cx("rounded-xl border p-4", p.insufficientData ? "border-amber-200 bg-amber-50/40" : "border-slate-200 bg-white")}>
+        <li key={p.key} className={cx("rounded-2xl border border-l-4 p-4", p.insufficientData ? "border-amber-200 bg-amber-50/40" : "border-slate-200 bg-white")} style={p.insufficientData ? undefined : { borderLeftColor: phaseColor(p, i) }}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex items-center gap-3">
-              <span className={cx("grid h-8 w-8 place-items-center rounded-lg text-sm font-semibold", p.insufficientData ? "bg-amber-100 text-amber-800" : "bg-slate-900 text-white")}>{i + 1}</span>
+              <span className={cx("grid h-8 w-8 place-items-center rounded-lg text-sm font-semibold", p.insufficientData ? "bg-amber-100 text-amber-800" : "text-white")} style={p.insufficientData ? undefined : { background: phaseColor(p, i) }}>{i + 1}</span>
               <div>
                 <div className="font-semibold text-slate-900">{p.name}</div>
                 <div className="text-xs text-slate-500">

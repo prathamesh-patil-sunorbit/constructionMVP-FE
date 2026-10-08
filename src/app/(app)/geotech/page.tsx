@@ -10,15 +10,17 @@ import { DailyWorkPlan, Dropzone, EquipmentCards, Icon, PhaseCards, PhaseTimelin
 import { fmtDateTime, todayInput } from "@/lib/format";
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
+const SOIL_COLOR: Record<SoilClass, string> = { soft: "#b9977a", ordinary: "#d9b96a", hard: "#c48b3c", rock: "#5f6b7d" };
 const SOIL_TONE: Record<SoilClass, string> = { soft: "amber", ordinary: "green", hard: "blue", rock: "purple" };
 
 function Panel({ title, icon, actions, children, className }: { title?: React.ReactNode; icon?: IconName; actions?: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (
-    <section className={cx("rounded-2xl border border-slate-200 bg-white shadow-sm", className)}>
+    <section className={cx("relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,.04),0_12px_28px_-16px_rgba(15,23,42,.18)]", className)}>
+      <div className="h-0.5 bg-gradient-to-r from-amber-400 via-amber-200 to-transparent" />
       {title && (
-        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-3.5">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-            {icon && <span className="grid h-7 w-7 place-items-center rounded-lg bg-slate-100 text-slate-600"><Icon name={icon} /></span>}
+        <header className="flex flex-wrap items-center justify-between gap-2 px-5 pb-1 pt-4">
+          <h2 className="flex items-center gap-2.5 text-[15px] font-semibold tracking-tight text-slate-900">
+            {icon && <span className="grid h-8 w-8 place-items-center rounded-xl bg-gradient-to-br from-amber-100 to-amber-50 text-amber-700 ring-1 ring-amber-200/80"><Icon name={icon} /></span>}
             {title}
           </h2>
           {actions}
@@ -274,17 +276,24 @@ function ReportView({ report, learning, onUpdated, onCreated }: {
 
       <Panel title="AI explanation" icon="sparkles" actions={narration?.aiGenerated ? <AiMark /> : undefined} className={narration ? "border-violet-200" : undefined}>
         {narration ? (
-          <div className="space-y-4 text-sm text-slate-700">
-            <p className="text-[15px] leading-relaxed text-slate-800">{narration.summary}</p>
+          <div className="space-y-5">
+            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-violet-50 via-white to-amber-50/60 p-5 ring-1 ring-violet-100">
+              <span className="absolute inset-y-4 left-0 w-1 rounded-r bg-violet-400" />
+              <p className="relative pl-2 text-[15px] leading-relaxed text-slate-800">{narration.summary}</p>
+            </div>
             {!!narration.recommendations?.length && (
-              <ol className="grid gap-2 md:grid-cols-2">
-                {narration.recommendations.map((r, i) => (
-                  <li key={i} className="flex gap-3 rounded-xl bg-violet-50/60 p-3">
-                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-violet-100 text-xs font-semibold text-violet-700">{i + 1}</span>
-                    <span><span className="font-medium text-slate-900">{r.action}</span><span className="block text-xs text-slate-500">{r.rationale}</span></span>
-                  </li>
-                ))}
-              </ol>
+              <div>
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">What to do</div>
+                <ol className="grid gap-3 md:grid-cols-3">
+                  {narration.recommendations.map((r, i) => (
+                    <li key={i} className="relative overflow-hidden rounded-2xl border border-violet-100 bg-white p-4 shadow-sm">
+                      <span className="pointer-events-none absolute -bottom-3 right-3 text-7xl font-black leading-none text-violet-50">{i + 1}</span>
+                      <span className="relative block text-sm font-semibold leading-snug text-slate-900">{r.action}</span>
+                      <span className="relative mt-2 block text-xs leading-relaxed text-slate-500">{r.rationale}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
             )}
           </div>
         ) : (
@@ -301,9 +310,9 @@ function ReportView({ report, learning, onUpdated, onCreated }: {
         icon="users"
         actions={<CalculatedMark title="Each phase's total split evenly across its days — a sequencing guide, not a measured record" />}
       >
-        <p className="mb-3 text-xs text-slate-500">
+        <p className="mb-4 rounded-xl bg-slate-50 px-4 py-2.5 text-xs leading-relaxed text-slate-500">
           Day by day: what the crew does, how many workers of each trade, and which machines are needed. Quantities are each
-          phase&apos;s total spread evenly across its days — actual daily output on site will vary.
+          phase&apos;s total spread evenly across its days — actual daily output on site will vary. Tap a phase to open or close it.
         </p>
         <DailyWorkPlan phases={e.phases} />
       </Panel>
@@ -418,21 +427,30 @@ function SourceTag({ source }: { source: Source }) {
     assumed: "bg-amber-50 text-amber-800 ring-amber-200",
     missing: "bg-slate-100 text-slate-500 ring-slate-200",
   }[source.kind];
+  const dot = { report: "bg-emerald-500", entered: "bg-sky-500", assumed: "bg-amber-500", missing: "bg-slate-400" }[source.kind];
   const text = source.kind === "report" ? `Report${source.page ? ` · p.${source.page}` : ""}` : source.kind === "entered" ? "Entered" : source.kind === "assumed" ? "Assumed" : "Not in report";
   const title = source.kind === "report" && source.quote ? `“${source.quote}”` : source.kind === "assumed" ? source.why : undefined;
-  return <span title={title} className={cx("inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset", style, title && "cursor-help")}>{text}</span>;
+  return (
+    <span title={title} className={cx("inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset", style, title && "cursor-help")}>
+      <span className={cx("h-1.5 w-1.5 rounded-full", dot)} />{text}
+    </span>
+  );
 }
 
 function FactTile({ icon, label, value, source, sub }: { icon: IconName; label: string; value: string | number | null | undefined; source: Source; sub?: string | null }) {
   const missing = value === null || value === undefined;
+  const stripe = missing ? "bg-slate-200" : { report: "bg-emerald-400", entered: "bg-sky-400", assumed: "bg-amber-400", missing: "bg-slate-200" }[source.kind];
   return (
-    <div className={cx("rounded-xl border p-3", missing ? "border-dashed border-slate-300 bg-white" : source.kind === "assumed" ? "border-amber-200 bg-amber-50/40" : "border-slate-200 bg-slate-50/50")}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-400"><Icon name={icon} className="h-3.5 w-3.5" />{label}</div>
+    <div className={cx("relative overflow-hidden rounded-2xl border bg-white p-4 pl-5 transition hover:shadow-md", missing ? "border-dashed border-slate-300" : source.kind === "assumed" ? "border-amber-200 bg-amber-50/30" : "border-slate-200")}>
+      <span className={cx("absolute inset-y-0 left-0 w-1", stripe)} />
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+          <span className="grid h-7 w-7 place-items-center rounded-lg bg-slate-100 text-slate-500"><Icon name={icon} className="h-3.5 w-3.5" /></span>{label}
+        </span>
         <SourceTag source={missing ? { kind: "missing" } : source} />
       </div>
-      <div className={cx("mt-1.5 text-[15px] font-semibold", missing ? "text-slate-400" : "text-slate-900")}>{value ?? "Not stated"}</div>
-      {sub && !missing && <div className="mt-0.5 text-xs text-slate-500">{sub}</div>}
+      <div className={cx("mt-3 text-xl font-semibold tracking-tight", missing ? "text-slate-400" : "text-slate-900")}>{value ?? "Not stated"}</div>
+      {sub && !missing && <div className="mt-1 line-clamp-3 text-xs leading-relaxed text-slate-500" title={sub}>{sub}</div>}
     </div>
   );
 }
@@ -591,17 +609,21 @@ function KeyFindings({ report }: { report: GeotechReport }) {
   const items = report.extraction.facts?.keyFindings ?? [];
   if (!items.length) return null;
   return (
-    <Panel title="Other findings from the report" icon="file" actions={<span className="flex items-center gap-2"><AiMark /><span className="text-xs text-slate-400">{items.length}</span></span>}>
-      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-        {items.map((k, i) => (
-          <div key={i} className="rounded-xl border border-slate-200 bg-slate-50/50 p-3">
-            <div className="flex items-start justify-between gap-2">
-              <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{k.label}</span>
-              <SourceTag source={{ kind: "report", page: k.page }} />
+    <Panel title="Other findings from the report" icon="file" actions={<span className="flex items-center gap-2"><AiMark /><span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{items.length}</span></span>}>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {items.map((k, i) => {
+          const short = k.value.length <= 48;
+          return (
+            <div key={i} className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50/70 p-4 pl-5 transition hover:shadow-md">
+              <span className="absolute inset-y-0 left-0 w-1 bg-violet-300" />
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{k.label}</span>
+                <SourceTag source={{ kind: "report", page: k.page }} />
+              </div>
+              <div className={cx("mt-2.5", short ? "text-lg font-semibold tracking-tight text-slate-900" : "text-[13px] leading-relaxed text-slate-700")} title={k.value}>{k.value}</div>
             </div>
-            <div className="mt-1 text-sm font-semibold text-slate-900">{k.value}</div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </Panel>
   );
@@ -736,51 +758,66 @@ function LearningPanel({ report, learning, onUpdated }: { report: GeotechReport;
   };
 
   return (
-    <Panel title="How the agent learns" icon="brain" actions={<Badge tone="slate">{learning.observations} recorded job{learning.observations === 1 ? "" : "s"}</Badge>}>
-      <div className="grid gap-6 lg:grid-cols-2">
+    <Panel title="How the agent learns" icon="brain" actions={<span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">{learning.observations} recorded job{learning.observations === 1 ? "" : "s"}</span>}>
+      <div className="grid gap-6 lg:grid-cols-[1.15fr_1fr]">
         <div>
-          <p className="mb-4 text-sm text-slate-600">
+          <p className="mb-5 text-sm leading-relaxed text-slate-600">
             JCB output per day for each soil type. Every finished job moves the rate toward what the site actually achieved; the
             default counts as {learning.priorWeight} jobs, so one unusual job cannot swing it.
           </p>
-          <div className="space-y-3">
+          <div className="space-y-4">
             {(Object.keys(learning.rates) as SoilClass[]).map((cls) => {
               const r = learning.rates[cls];
               const here = cls === e.soil.class;
+              const color = SOIL_COLOR[cls];
               return (
-                <div key={cls}>
-                  <div className="mb-1 flex items-baseline justify-between text-sm">
-                    <span className={cx("capitalize", here ? "font-semibold text-slate-900" : "text-slate-700")}>
-                      {cls}{here && <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-800">this site</span>}
+                <div key={cls} className={cx("rounded-2xl border p-3.5 transition", here ? "border-amber-300 bg-amber-50/50 shadow-sm" : "border-slate-200 bg-white")}>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-2 text-sm font-semibold capitalize text-slate-900">
+                      <span className="h-3 w-3 rounded-full ring-2 ring-white" style={{ background: color, boxShadow: `0 0 0 1px ${color}` }} />{cls}
+                      {here && <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">this site</span>}
                     </span>
-                    <span className="tabular-nums text-slate-600"><span className="font-semibold text-slate-900">{r.used}</span> m³/day{r.used !== r.default && <span className="text-slate-400"> · default {r.default}</span>} · {r.observations} job{r.observations === 1 ? "" : "s"}</span>
+                    <span className="flex items-baseline gap-1.5 tabular-nums">
+                      <span className="text-xl font-bold text-slate-900">{r.used}</span>
+                      <span className="text-xs text-slate-500">m³/day</span>
+                      <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">{r.observations} job{r.observations === 1 ? "" : "s"}</span>
+                    </span>
                   </div>
-                  <div className="relative h-2 rounded-full bg-slate-100" title={`Default ${r.default} m³/day, learned ${r.used} m³/day`}>
-                    <div className={cx("absolute inset-y-0 left-0 rounded-full", here ? "bg-slate-800" : "bg-slate-400")} style={{ width: `${(r.used / maxRate) * 100}%` }} />
-                    <div className="absolute -inset-y-0.5 w-0.5 rounded bg-amber-500" style={{ left: `${(r.default / maxRate) * 100}%` }} />
+                  <div className="relative h-3 rounded-full bg-slate-100" title={`Default ${r.default} m³/day, learned ${r.used} m³/day`}>
+                    <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${(r.used / maxRate) * 100}%`, background: `linear-gradient(90deg, ${color}99, ${color})` }} />
+                    <div className="absolute -inset-y-1 w-1 rounded bg-slate-900" style={{ left: `calc(${(r.default / maxRate) * 100}% - 2px)` }} />
                   </div>
+                  {r.used !== r.default && <div className="mt-1.5 text-[11px] text-slate-400">default {r.default} m³/day</div>}
                 </div>
               );
             })}
           </div>
-          <p className="mt-3 flex items-center gap-1.5 text-[11px] text-slate-400"><span className="h-2.5 w-0.5 rounded bg-amber-500" /> default rate · site factor × {learning.siteFactor} · schedule factor × {learning.scheduleFactor}</p>
+          <p className="mt-3 flex items-center gap-2 text-[11px] text-slate-400"><span className="h-3 w-1 rounded bg-slate-900" /> default rate · site factor × {learning.siteFactor} · schedule factor × {learning.scheduleFactor}</p>
         </div>
 
-        <div className="rounded-xl bg-slate-50 p-4">
-          <div className="font-medium text-slate-900">Record what actually happened</div>
-          <p className="mt-0.5 text-xs text-slate-500">After excavation, enter the real figures. Estimated: {e.excavation.days} days with {e.excavation.jcbs} JCB(s), {e.totals.calendarDays} days to plinth.</p>
+        <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-5 shadow-sm">
+          <div className="flex items-center gap-2.5">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-slate-900 text-amber-300"><Icon name="check" className="h-4 w-4" /></span>
+            <div className="font-semibold text-slate-900">Record what actually happened</div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full bg-white px-2.5 py-1 font-medium text-slate-600 ring-1 ring-slate-200">Estimated · {e.excavation.days} days</span>
+            <span className="rounded-full bg-white px-2.5 py-1 font-medium text-slate-600 ring-1 ring-slate-200">{e.excavation.jcbs} JCB{e.excavation.jcbs === 1 ? "" : "s"}</span>
+            <span className="rounded-full bg-white px-2.5 py-1 font-medium text-slate-600 ring-1 ring-slate-200">{e.totals.calendarDays} days to plinth</span>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">After excavation, enter the real figures so the next estimate is closer.</p>
           {report.actual?.excavationDays ? (
-            <p className="mt-3 flex items-start gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+            <p className="mt-3 flex items-start gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-800 ring-1 ring-emerald-200">
               <Icon name="check" className="mt-0.5 h-4 w-4 shrink-0" />
               Recorded: {report.actual.excavationDays} excavation days with {report.actual.jcbCount} JCB(s){report.actual.totalDays ? `, ${report.actual.totalDays} days to plinth` : ""}.
             </p>
           ) : null}
           {canRecord ? (
-            <form className="mt-3 space-y-2" onSubmit={save}>
+            <form className="mt-4 space-y-3" onSubmit={save}>
               <div className="grid grid-cols-3 gap-2">
-                <label className="space-y-1"><span className="text-[11px] font-medium text-slate-600">Excavation</span><UnitInput unit="days" type="number" min="1" step="0.5" required value={form.excavationDays} onChange={(x) => setForm({ ...form, excavationDays: x.target.value })} /></label>
-                <label className="space-y-1"><span className="text-[11px] font-medium text-slate-600">JCBs used</span><Input type="number" min="1" step="1" required value={form.jcbCount} onChange={(x) => setForm({ ...form, jcbCount: x.target.value })} /></label>
-                <label className="space-y-1"><span className="text-[11px] font-medium text-slate-600">To plinth</span><UnitInput unit="days" type="number" min="1" step="1" value={form.totalDays} onChange={(x) => setForm({ ...form, totalDays: x.target.value })} placeholder="opt." /></label>
+                <label className="space-y-1"><span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Excavation</span><UnitInput unit="days" type="number" min="1" step="0.5" required value={form.excavationDays} onChange={(x) => setForm({ ...form, excavationDays: x.target.value })} /></label>
+                <label className="space-y-1"><span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">JCBs used</span><Input type="number" min="1" step="1" required value={form.jcbCount} onChange={(x) => setForm({ ...form, jcbCount: x.target.value })} /></label>
+                <label className="space-y-1"><span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">To plinth</span><UnitInput unit="days" type="number" min="1" step="1" value={form.totalDays} onChange={(x) => setForm({ ...form, totalDays: x.target.value })} placeholder="opt." /></label>
               </div>
               <div className="flex gap-2">
                 <Input placeholder="Note (optional)" value={form.note} onChange={(x) => setForm({ ...form, note: x.target.value })} />
