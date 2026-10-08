@@ -152,141 +152,172 @@ function placeLayers(layers: SoilLayer[], bottom: number) {
 // Depths are shown to two decimals at most; anything longer is a misread, not precision.
 const fmtNum = (d: number) => Math.round(d * 100) / 100;
 
-const trim = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-
-// Spread label positions so they never overlap, keeping each as close to its layer as possible.
-function spread(targets: number[], minGap: number, lo: number, hi: number) {
-  const out = targets.map((t) => Math.min(Math.max(t, lo), hi));
-  for (let i = 1; i < out.length; i++) out[i] = Math.max(out[i], out[i - 1] + minGap);
-  const overflow = out.length ? out[out.length - 1] - hi : 0;
-  if (overflow > 0) for (let i = out.length - 1; i >= 0; i--) out[i] = Math.max(lo + i * minGap, out[i] - overflow);
-  return out;
-}
+const TEXTURE: Record<string, string> = {
+  "Soft / fill": "tx-soft",
+  Soil: "tx-soil",
+  "Hard / weathered": "tx-hard",
+  Rock: "tx-rock",
+};
 
 export function SoilProfile({ facts, depthM, foundation }: { facts: GeotechFacts; depthM: number; foundation?: FoundationType }) {
+  const [hi, setHi] = useState<number | null>(null);
   const gw = facts.groundwaterDepthM;
   const lastTo = Math.max(0, ...facts.layers.map((l) => l.toDepthM ?? l.fromDepthM ?? 0));
   const bottom = Math.max(3, lastTo, depthM + 0.75, gw !== null ? gw + 0.5 : 0);
   const layers = placeLayers(facts.layers, lastTo || bottom);
   const used = new Set(layers.map((l) => material(l.description).name));
   // Reports with several boreholes give each layer as a range that overlaps the next one.
-  // Stacking those in one column would hide that; draw one bar per layer instead.
+  // Stacking those in one column would hide that; draw one bore column per layer instead.
   const ranges = layers.some((l, i) => i > 0 && l.from < layers[i - 1].to - 0.05);
 
-  const W = 440;
-  const top = 26;
-  const H = 330;
-  const colX = 46;
-  const colW = 130;
+  const W = 560;
+  const top = 58;
+  const H = 320;
+  const colX = 58;
+  const colW = W - colX - 18;
   const y = (d: number) => top + (d / bottom) * H;
   const step = bottom > 8 ? 2 : bottom > 4 ? 1 : 0.5;
   const ticks = Array.from({ length: Math.floor(bottom / step) + 1 }, (_, i) => i * step);
   const exY = y(depthM);
-  const lane = ranges ? (colW - 6) / Math.max(1, layers.length) : colW;
-  const labelY = spread(layers.map((l) => (y(l.from) + y(l.to)) / 2), 30, top + 10, top + H - 8);
+  const lane = ranges ? colW / Math.max(1, layers.length) : colW;
+  const pitW = colW * 0.34;
+  const pitX = colX + (colW - pitW) / 2;
+  const wet = gw !== null && gw < depthM;
 
   const tip = (l: (typeof layers)[number]) =>
     `${l.from}–${l.to} m: ${l.description}${l.sptN !== null ? ` (SPT N ${l.sptN})` : ""}${l.page ? ` · page ${l.page}` : ""}${l.sourceText ? `\nReport: “${l.sourceText}”` : ""}${l.stated ? "" : "\nDepth not stated in the report"}`;
 
   return (
     <div>
-      <svg viewBox={`0 0 ${W} ${top + H + 12}`} className="mx-auto block w-full max-w-[500px]" role="img" aria-label={`Soil profile to ${fmtNum(bottom)} m with excavation at ${depthM} m`}>
-        <defs>
-          <pattern id="unstated" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-            <line x1="0" y1="0" x2="0" y2="6" stroke="#94a3b8" strokeWidth="1.5" />
-          </pattern>
-          <clipPath id="column"><rect x={colX} y={top} width={colW} height={H} rx="6" /></clipPath>
-        </defs>
+      <div className="overflow-hidden rounded-2xl bg-gradient-to-b from-sky-50 via-white to-amber-50/40 ring-1 ring-slate-200">
+        <svg viewBox={`0 0 ${W} ${top + H + 16}`} className="block w-full" role="img" aria-label={`Soil cross-section to ${fmtNum(bottom)} m with excavation at ${depthM} m`}>
+          <defs>
+            <pattern id="tx-soil" width="10" height="10" patternUnits="userSpaceOnUse"><circle cx="2" cy="3" r="0.9" fill="#fff" fillOpacity="0.55" /><circle cx="7" cy="7" r="0.9" fill="#7c5a2a" fillOpacity="0.35" /></pattern>
+            <pattern id="tx-soft" width="14" height="8" patternUnits="userSpaceOnUse"><path d="M0 4 Q3.5 0 7 4 T14 4" fill="none" stroke="#fff" strokeOpacity="0.45" strokeWidth="1.2" /></pattern>
+            <pattern id="tx-hard" width="14" height="12" patternUnits="userSpaceOnUse"><circle cx="3.5" cy="3" r="2" fill="#fff" fillOpacity="0.28" /><circle cx="10" cy="8.5" r="2.6" fill="#5b3a0e" fillOpacity="0.28" /><circle cx="11" cy="2" r="0.9" fill="#fff" fillOpacity="0.5" /></pattern>
+            <pattern id="tx-rock" width="12" height="12" patternUnits="userSpaceOnUse"><path d="M0 12 L12 0 M-3 3 L3 -3 M9 15 L15 9" stroke="#fff" strokeOpacity="0.35" strokeWidth="1.2" /></pattern>
+            <pattern id="unstated" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#fff" strokeOpacity="0.8" strokeWidth="1.5" /></pattern>
+            <linearGradient id="shine" x1="0" x2="1"><stop offset="0" stopColor="#000" stopOpacity="0.16" /><stop offset="0.35" stopColor="#fff" stopOpacity="0.2" /><stop offset="1" stopColor="#000" stopOpacity="0.12" /></linearGradient>
+            <linearGradient id="water" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#38bdf8" stopOpacity="0.55" /><stop offset="1" stopColor="#0284c7" stopOpacity="0.8" /></linearGradient>
+            <clipPath id="strata"><rect x={colX} y={top} width={colW} height={H} rx="14" /></clipPath>
+          </defs>
 
-        {/* depth axis + faint grid */}
-        {ticks.map((d) => (
-          <g key={d}>
-            <line x1={colX - 5} x2={colX} y1={y(d)} y2={y(d)} stroke="#cbd5e1" />
-            {ranges && <line x1={colX} x2={colX + colW} y1={y(d)} y2={y(d)} stroke="#e2e8f0" strokeDasharray="2 3" />}
-            <text x={colX - 9} y={y(d) + 3.5} textAnchor="end" fontSize="10" className="fill-slate-400">{d} m</text>
+          {/* depth axis */}
+          {ticks.map((d) => (
+            <g key={d}>
+              <text x={colX - 12} y={y(d) + 3.5} textAnchor="end" fontSize="10" className="fill-slate-400">{d} m</text>
+              <line x1={colX - 6} x2={colX} y1={y(d)} y2={y(d)} stroke="#cbd5e1" />
+            </g>
+          ))}
+
+          <g clipPath="url(#strata)">
+            <rect x={colX} y={top} width={colW} height={H} fill="#f1f5f9" />
+            {!layers.length && <rect x={colX} y={top} width={colW} height={H} fill="#cbd5e1" />}
+            {layers.map((l, i) => {
+              const m = material(l.description);
+              const y1 = y(l.from);
+              const h = Math.max(4, y(l.to) - y1);
+              const x = ranges ? colX + i * lane : colX;
+              const w = ranges ? lane : colW;
+              const dim = hi !== null && hi !== i;
+              return (
+                <g key={i} opacity={dim ? 0.35 : 1} style={{ transition: "opacity .15s" }} onMouseEnter={() => setHi(i)} onMouseLeave={() => setHi(null)}>
+                  <title>{tip(l)}</title>
+                  <rect x={x} y={y1} width={w} height={h} fill={m.fill} />
+                  <rect x={x} y={y1} width={w} height={h} fill={`url(#${TEXTURE[m.name]})`} />
+                  {ranges && <rect x={x} y={y1} width={w} height={h} fill="url(#shine)" />}
+                  {!l.stated && <rect x={x} y={y1} width={w} height={h} fill="url(#unstated)" opacity="0.5" />}
+                  <rect x={x} y={y1} width={w} height={h} fill="none" stroke="#fff" strokeOpacity="0.85" strokeWidth={ranges ? 2 : 1.5} />
+                  {(ranges || h > 22) && (
+                    <g transform={`translate(${ranges ? x + w / 2 : colX + 18} ${y1 + Math.min(h / 2, 16)})`}>
+                      <circle r="9.5" fill="#0f172a" fillOpacity="0.78" stroke="#fff" strokeWidth="1.5" />
+                      <text y="3.7" textAnchor="middle" fontSize="10" fontWeight="700" fill="#fff">{i + 1}</text>
+                    </g>
+                  )}
+                </g>
+              );
+            })}
+
+            {/* flooded part of the pit */}
+            {wet && <rect x={pitX} y={y(gw)} width={pitW} height={exY - y(gw)} fill="url(#water)" />}
           </g>
-        ))}
 
-        <g clipPath="url(#column)">
-          {!layers.length && <rect x={colX} y={top} width={colW} height={H} fill="url(#unstated)" />}
-          {layers.map((l, i) => {
-            const m = material(l.description);
-            const y1 = y(l.from);
-            const h = Math.max(3, y(l.to) - y1);
-            const x = ranges ? colX + 3 + i * lane : colX;
-            const w = ranges ? lane - 3 : colW;
-            return (
-              <g key={i}>
-                <title>{tip(l)}</title>
-                <rect x={x} y={y1} width={w} height={h} rx={ranges ? 3 : 0} fill={m.fill} />
-                {!ranges && <line x1={colX} x2={colX + colW} y1={y1} y2={y1} stroke="#fff" strokeOpacity="0.7" strokeWidth="1.5" />}
-                {!l.stated && <rect x={x} y={y1} width={w} height={h} fill="url(#unstated)" opacity="0.6" />}
-                {ranges && <text x={x + w / 2} y={y1 + 12} textAnchor="middle" fontSize="9" fontWeight="700" className="fill-white">{i + 1}</text>}
+          {/* excavation envelope */}
+          <path d={`M ${pitX - 10} ${top} L ${pitX + 2} ${exY} L ${pitX + pitW - 2} ${exY} L ${pitX + pitW + 10} ${top}`} fill="#fff" fillOpacity="0.5" stroke="#ef4444" strokeWidth="1.6" strokeDasharray="5 4" strokeLinejoin="round" />
+          <Foundation type={foundation} x={pitX} w={pitW} y={exY} />
+          <line x1={pitX - 2} x2={pitX + pitW + 2} y1={exY} y2={exY} stroke="#dc2626" strokeWidth="3" strokeLinecap="round" />
+
+          {/* depth dimension */}
+          <g stroke="#dc2626" fill="#dc2626">
+            <line x1={pitX + pitW + 26} x2={pitX + pitW + 26} y1={top + 4} y2={exY - 4} strokeWidth="1.4" />
+            <path d={`M ${pitX + pitW + 26} ${top + 3} l -3.5 7 h 7 z M ${pitX + pitW + 26} ${exY - 3} l -3.5 -7 h 7 z`} stroke="none" />
+          </g>
+          <rect x={pitX + pitW + 34} y={(top + exY) / 2 - 12} width={74} height={24} rx="12" fill="#fff" stroke="#fca5a5" />
+          <text x={pitX + pitW + 71} y={(top + exY) / 2 + 4} textAnchor="middle" fontSize="11" fontWeight="700" className="fill-red-700">dig {depthM} m</text>
+
+          {/* water table */}
+          {gw !== null && (
+            <g>
+              <title>{`Water table at ${gw} m${facts.groundwaterNote ? ` (${facts.groundwaterNote})` : ""}${gw <= depthM ? ` — ${gw < depthM ? "above" : "at"} the excavation bottom: dewatering needed` : ""}`}</title>
+              <path d={`M ${colX} ${y(gw)} ${"q 5 -4 10 0 t 10 0 ".repeat(Math.ceil(colW / 20))}`} fill="none" stroke="#0284c7" strokeWidth="2.2" clipPath="url(#strata)" />
+              <g transform={`translate(${colX + 8} ${y(gw) - 24})`}>
+                <rect width={wet ? 118 : 82} height="19" rx="9.5" fill="#0284c7" />
+                <text x={wet ? 59 : 41} y="13" textAnchor="middle" fontSize="10.5" fontWeight="700" fill="#fff">{wet ? `💧 Water ${gw} m · pump` : `💧 Water ${gw} m`}</text>
               </g>
-            );
-          })}
-          {/* excavated zone */}
-          <rect x={colX} y={top} width={colW} height={exY - top} fill="#fff" opacity="0.4" />
-        </g>
-        <rect x={colX} y={top} width={colW} height={H} rx="6" fill="none" stroke="#cbd5e1" />
+            </g>
+          )}
 
-        {/* layer labels, spread so they never overlap, with a leader line to the layer */}
+          {/* ground surface */}
+          <rect x={colX - 4} y={top - 10} width={colW + 8} height="10" rx="5" fill="#65a30d" />
+          <rect x={colX - 4} y={top - 10} width={colW + 8} height="4" rx="2" fill="#a3e635" />
+          <text x={colX} y={top - 22} fontSize="10" fontWeight="700" letterSpacing="1.5" className="fill-slate-500">GROUND LEVEL · 0 m</text>
+          <rect x={colX} y={top} width={colW} height={H} rx="14" fill="none" stroke="#cbd5e1" />
+        </svg>
+      </div>
+
+      {/* layer cards: one per layer, hover to highlight in the section */}
+      <ol className="mt-3 grid gap-2 sm:grid-cols-2">
         {layers.map((l, i) => {
           const m = material(l.description);
-          const mid = (y(l.from) + y(l.to)) / 2;
-          const ly = labelY[i];
-          const lx = colX + colW + 22;
+          const a = Math.min(100, (l.from / bottom) * 100);
+          const b = Math.min(100, (l.to / bottom) * 100);
           return (
-            <g key={i}>
-              <title>{tip(l)}</title>
-              <path d={`M ${colX + colW + 3} ${mid} L ${colX + colW + 12} ${mid} L ${colX + colW + 12} ${ly} L ${lx - 4} ${ly}`} fill="none" stroke="#cbd5e1" />
-              <rect x={lx} y={ly - 10} width="9" height="9" rx="2" fill={m.fill} />
-              {ranges && <text x={lx + 4.5} y={ly - 2.5} textAnchor="middle" fontSize="7" fontWeight="700" className="fill-white">{i + 1}</text>}
-              <text x={lx + 14} y={ly - 2} fontSize="11.5" fontWeight="500" className="fill-slate-800">{trim(l.description, 32)}</text>
-              <text x={lx} y={ly + 12} fontSize="10" className="fill-slate-500">
-                {`${l.from}–${l.to} m${l.sptN !== null ? ` · N ${l.sptN}` : ""}${l.page ? ` · p.${l.page}` : ""}${l.stated ? "" : " · depth not stated"}`}
-              </text>
-            </g>
+            <li
+              key={i}
+              onMouseEnter={() => setHi(i)}
+              onMouseLeave={() => setHi(null)}
+              title={tip(l)}
+              className={cx("flex gap-3 rounded-xl border bg-white p-2.5 transition", hi === i ? "border-slate-400 shadow-md" : "border-slate-200")}
+            >
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-sm font-bold text-white" style={{ background: m.fill }}>{i + 1}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] font-medium text-slate-800">{l.description}</span>
+                <span className="mt-0.5 block text-[11px] text-slate-500">
+                  {`${l.from}–${l.to} m`}{l.sptN !== null ? ` · SPT N ${l.sptN}` : ""}{l.page ? ` · p.${l.page}` : ""}{l.stated ? "" : " · depth not stated"}
+                </span>
+                <span className="mt-1.5 block h-1.5 rounded-full bg-slate-100">
+                  <span className="relative block h-full rounded-full" style={{ marginLeft: `${a}%`, width: `${Math.max(3, b - a)}%`, background: m.fill }} />
+                </span>
+              </span>
+            </li>
           );
         })}
-        {!layers.length && <text x={colX + colW + 18} y={top + 20} fontSize="11" className="fill-slate-500">No layers stated in the report</text>}
+      </ol>
 
-        <Foundation type={foundation} x={colX} w={colW} y={exY} />
-
-        {/* excavation bottom */}
-        <line x1={colX - 5} x2={colX + colW + 5} y1={exY} y2={exY} stroke="#dc2626" strokeWidth="2" />
-        <rect x={colX + colW / 2 - 44} y={exY + 4} width={88} height={16} rx="8" fill="#fff" stroke="#fca5a5" />
-        <text x={colX + colW / 2} y={exY + 15.5} textAnchor="middle" fontSize="10" fontWeight="600" className="fill-red-700">Excavation {depthM} m</text>
-
-        {/* water table */}
-        {gw !== null && (
-          <g>
-            <title>{`Water table at ${gw} m${facts.groundwaterNote ? ` (${facts.groundwaterNote})` : ""}${gw <= depthM ? ` — ${gw < depthM ? "above" : "at"} the excavation bottom: dewatering needed` : ""}`}</title>
-            <line x1={colX - 5} x2={colX + colW + 5} y1={y(gw)} y2={y(gw)} stroke="#0284c7" strokeWidth="2" strokeDasharray="6 4" />
-            <rect x={colX + 4} y={y(gw) - 20} width={70} height={16} rx="8" fill="#fff" stroke="#7dd3fc" />
-            <text x={colX + 39} y={y(gw) - 8.5} textAnchor="middle" fontSize="10" fontWeight="600" className="fill-sky-700">▽ Water {gw} m</text>
-          </g>
-        )}
-
-        {/* ground level */}
-        <line x1={colX - 5} x2={colX + colW + 5} y1={top} y2={top} stroke="#334155" strokeWidth="2.5" />
-        <text x={colX} y={top - 9} fontSize="10" fontWeight="600" className="fill-slate-600">GROUND LEVEL</text>
-      </svg>
-
-      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-slate-100 pt-3 text-xs text-slate-600">
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-600">
         {Object.values(MATERIAL).filter((m) => used.has(m.name)).map((m) => (
-          <span key={m.name} className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: m.fill }} />{m.name}</span>
+          <span key={m.name} className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1 ring-1 ring-slate-200"><span className="h-2.5 w-2.5 rounded-full" style={{ background: m.fill }} />{m.name}</span>
         ))}
-        <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-4 bg-red-600" />Excavation</span>
-        {gw !== null && <span className="inline-flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-dashed border-sky-600" />Water table</span>}
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-red-700 ring-1 ring-red-200">Excavation envelope</span>
+        {gw !== null && <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-2.5 py-1 text-sky-700 ring-1 ring-sky-200">Water table</span>}
       </div>
       {ranges && (
-        <p className="mt-1.5 text-xs text-slate-500">
-          Depths vary between boreholes, so each numbered bar shows the full depth range the report gives for that layer.
+        <p className="mt-2 text-xs text-slate-500">
+          Depths vary between boreholes, so each numbered column shows the full depth range the report gives for that layer.
         </p>
       )}
       {gw === null && (
-        <p className="mt-1.5 text-xs text-slate-500">Groundwater: {(facts.groundwaterNote || "not stated in the report").replace(/\.+$/, "")}.</p>
+        <p className="mt-2 text-xs text-slate-500">Groundwater: {(facts.groundwaterNote || "not stated in the report").replace(/\.+$/, "")}.</p>
       )}
     </div>
   );
