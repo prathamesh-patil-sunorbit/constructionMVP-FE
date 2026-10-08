@@ -615,6 +615,12 @@ export interface BuildingModel {
   spec: Record<string, number | string | boolean>;
   sources: Record<string, string>;
   stored: boolean;
+  floorplan?: {
+    source?: { originalName: string; url: string; uploadedAt: string };
+    stats: Record<string, { title: string; widthM: number; depthM: number; walls: number; openings: number; rooms: number; furniture: number; flats: number }>;
+    floors: { typical: number[]; refuge: number[] };
+    floorCount: number;
+  } | null;
   dimensions: { plateWidthM: number; plateDepthM: number; floorHeightM: number; towers: number; detailedFloors: number; totalHeightM: number };
   towers: { id: string; name: string; floors: { id: string; name: string; storey: number | null }[] }[];
   components: {

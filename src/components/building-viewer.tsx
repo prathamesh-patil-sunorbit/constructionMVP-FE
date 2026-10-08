@@ -955,7 +955,7 @@ export function BuildingViewer({ model }: { model: BuildingModel }) {
     <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
       <Card
         title="3D / 4D building"
-        actions={<CalculatedMark title="City Life massing from job 2184 — long slab, both-side balconies, LGF + ground + 3 podium + 21 floors. Not a BIM model." />}
+        actions={<CalculatedMark title={model.disclaimer} />}
       >
         <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
           <label className="flex items-center gap-2">
