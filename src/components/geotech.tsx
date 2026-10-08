@@ -16,8 +16,13 @@ const EQUIPMENT_PHOTOS: Record<string, string> = {
   Tipper: "/equipment/tipper.jpg",
   "Plate compactor": "/equipment/plate-compactor.jpg",
   "Dewatering pump": "/equipment/dewatering-pump.jpg",
+  "Rock breaker": "/equipment/rock-breaker.jpg",
+  "Concrete pump": "/equipment/concrete-pump.jpg",
+  "Needle vibrator": "/equipment/needle-vibrator.jpg",
+  "Bar bending machine": "/equipment/bar-bending-machine.jpg",
 };
-export const equipmentPhoto = (name: string) => EQUIPMENT_PHOTOS[name];
+// A card is never left empty: a machine without its own photo shows the closest generic one.
+export const equipmentPhoto = (name: string, kind: "machine" | "vehicle" = "machine") => EQUIPMENT_PHOTOS[name] || (kind === "vehicle" ? EQUIPMENT_PHOTOS.Tipper : EQUIPMENT_PHOTOS.JCB);
 
 // ---------------------------------------------------------------------------
 // Icons (inline, stroke-based so they inherit text colour)
@@ -460,6 +465,93 @@ export function EquipmentTile({ name, count, kind, size = "md" }: { name: string
     <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white py-1 pl-1 pr-2.5">
       {thumb}
       <span className="text-xs font-medium leading-tight text-slate-700">{name}</span>
+    </div>
+  );
+}
+
+// What each machine is for, in plain words. Static text: it describes the machine, not the site.
+const EQUIPMENT_USE: Record<string, string> = {
+  JCB: "Backhoe loader for digging the plinth excavation, trimming sides and loading tippers.",
+  "Rock breaker": "Hydraulic breaker for hard rock and boulders that a bucket cannot cut.",
+  "Dewatering pump": "Keeps the excavation dry where the water table is above the dig bottom.",
+  "Concrete mixer": "Site mixer for PCC and small pours.",
+  "Concrete pump": "Places concrete into footings and plinth beams without carrying it by hand.",
+  "Needle vibrator": "Compacts fresh concrete so there are no voids around the steel.",
+  "Bar bending machine": "Cuts and bends reinforcement bars to the bar-bending schedule.",
+  "Plate compactor": "Compacts backfill in layers around the foundation.",
+  Tipper: "Hauls excavated soil and rock off site.",
+  "Transit mixer": "Brings ready-mix concrete from the plant to the pour.",
+};
+
+export function EquipmentCards({ estimate }: { estimate: GeotechEstimate }) {
+  const t = estimate.totals;
+  const items = [
+    ...t.machines.map((m) => ({ ...m, kind: "machine" as const })),
+    ...[{ name: "Tipper", count: t.tippers }].filter((v) => v.count > 0).map((v) => ({ ...v, kind: "vehicle" as const })),
+    ...t.otherVehicles.map((v) => ({ ...v, kind: "vehicle" as const })),
+  ];
+  const usage = (name: string) => {
+    const used = estimate.phases.filter((p) => !p.insufficientData && [...p.machines, ...p.vehicles].some((m) => m.name === name));
+    return {
+      phases: used.map((p) => p.name),
+      from: used.length ? Math.min(...used.map((p) => p.startDay)) : null,
+      to: used.length ? Math.max(...used.map((p) => p.endDay)) : null,
+      days: used.reduce((n, p) => n + p.days, 0),
+    };
+  };
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-500"><Icon name="wrench" className="h-3.5 w-3.5" />Machines &amp; vehicles needed</div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {items.map((m) => {
+          const photo = equipmentPhoto(m.name, m.kind);
+          const u = usage(m.name);
+          return (
+            <article key={m.name} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
+              <div className="relative h-44 overflow-hidden bg-slate-800">
+                {photo ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={photo} alt={m.name} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" loading="lazy" />
+                ) : (
+                  <div className="grid h-full w-full place-items-center bg-gradient-to-br from-slate-700 via-slate-800 to-amber-900/70">
+                    <Icon name={EQUIPMENT_ICON[m.name] || (m.kind === "vehicle" ? "truck" : "wrench")} className="h-16 w-16 text-amber-200/50" />
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-950/10 to-transparent" />
+                <span className={cx("absolute left-3 top-3 rounded-md px-2 py-0.5 text-[11px] font-semibold", m.kind === "vehicle" ? "bg-sky-100 text-sky-900" : "bg-amber-100 text-amber-900")}>
+                  {m.kind === "vehicle" ? "Vehicle" : "Machine"}
+                </span>
+                <div className="absolute inset-x-3 bottom-3 flex items-end justify-between gap-2">
+                  <h4 className="text-lg font-bold leading-tight text-white drop-shadow">{m.name}</h4>
+                  <span className="shrink-0 rounded-md bg-white px-2 py-1 text-xs font-bold text-slate-900">{m.count} {m.count === 1 ? "Unit" : "Units"}</span>
+                </div>
+              </div>
+              <div className="space-y-3 p-4">
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">What it does</div>
+                  <p className="mt-0.5 text-[13px] leading-snug text-slate-700">{EQUIPMENT_USE[m.name] || "Used on site for the plinth works."}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-lg bg-slate-50 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-400">Timeline</div>
+                    <div className="text-sm font-semibold tabular-nums text-amber-800">{u.from !== null ? `Day ${u.from}–${u.to}` : "–"}</div>
+                  </div>
+                  <div className="rounded-lg bg-slate-50 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-400">Active days</div>
+                    <div className="text-sm font-semibold tabular-nums text-amber-800">{u.days || "–"}</div>
+                  </div>
+                </div>
+                {u.phases.length > 0 && (
+                  <div className="rounded-lg border border-amber-100 bg-amber-50/60 px-3 py-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-800">Used in</div>
+                    <p className="mt-0.5 text-xs text-slate-700">{u.phases.join(" · ")}</p>
+                  </div>
+                )}
+              </div>
+            </article>
+          );
+        })}
+      </div>
     </div>
   );
 }

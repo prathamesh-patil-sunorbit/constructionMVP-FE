@@ -6,7 +6,7 @@ import { API_URL, api, useApi } from "@/lib/api";
 import type { GeotechEstimate, GeotechList, GeotechReport, Project, SoilClass } from "@/lib/types";
 import { Badge, Button, ErrorBox, Input, Loading, Select } from "@/components/ui";
 import { AiMark, CalculatedMark } from "@/components/ai";
-import { DailyWorkPlan, Dropzone, EquipmentTile, Icon, PhaseCards, PhaseTimeline, SoilProfile, Spinner, type IconName } from "@/components/geotech";
+import { DailyWorkPlan, Dropzone, EquipmentCards, Icon, PhaseCards, PhaseTimeline, SoilProfile, Spinner, type IconName } from "@/components/geotech";
 import { fmtDateTime, todayInput } from "@/lib/format";
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
@@ -372,11 +372,6 @@ function Kpi({ icon, photo, label, value, sub, accent }: { icon: IconName; photo
 function Kpis({ estimate: e }: { estimate: GeotechEstimate }) {
   const t = e.totals;
   const busiest = e.phases.find((p) => p.workerTotal === t.peakWorkers)?.name;
-  const equipment = [
-    ...t.machines.map((m) => ({ ...m, kind: "machine" as const })),
-    ...[{ name: "Tipper", count: t.tippers }].filter((v) => v.count > 0).map((v) => ({ ...v, kind: "vehicle" as const })),
-    ...t.otherVehicles.map((v) => ({ ...v, kind: "vehicle" as const })),
-  ];
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -385,10 +380,7 @@ function Kpis({ estimate: e }: { estimate: GeotechEstimate }) {
         <Kpi icon="users" label="Peak workers" value={t.peakWorkers} sub={busiest ? `during ${busiest.toLowerCase()}` : undefined} />
         <Kpi icon="truck" photo="/equipment/tipper.jpg" label="Tippers" value={t.tippers} sub={`${e.excavation.looseVolumeM3} m³ to haul`} />
       </div>
-      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-        <span className="mr-1 flex items-center gap-1.5 text-xs font-medium text-slate-500"><Icon name="wrench" className="h-3.5 w-3.5" />Machines &amp; vehicles needed</span>
-        {equipment.map((m) => <EquipmentTile key={m.name} name={m.name} count={m.count} kind={m.kind} />)}
-      </div>
+      <EquipmentCards estimate={e} />
     </div>
   );
 }
