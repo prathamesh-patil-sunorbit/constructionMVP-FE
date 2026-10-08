@@ -8,6 +8,8 @@ import { Badge, Button, ErrorBox, Input, Loading, Select } from "@/components/ui
 import { AiMark, CalculatedMark } from "@/components/ai";
 import { DailyWorkPlan, Dropzone, EquipmentCards, Icon, PhaseCards, PhaseTimeline, SoilProfile, Spinner, type IconName } from "@/components/geotech";
 import { fmtDateTime, todayInput } from "@/lib/format";
+import { useAuth } from "@/lib/auth";
+import { canAccess } from "@/lib/navigation";
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 const SOIL_TONE: Record<SoilClass, string> = { soft: "amber", ordinary: "green", hard: "blue", rock: "purple" };
@@ -145,7 +147,7 @@ function EstimateForm({ projectId, configured, onCreated }: { projectId: string;
 
   const run = async (mode: "upload" | "sample") => {
     setErr(null);
-    if (!(Number(area) > 0)) return setErr("Enter the plinth area in m².");
+    if (area && !(Number(area) > 0)) return setErr("Plinth area must be more than 0 m².");
     if (mode === "upload" && !file) return setErr("Choose the geotechnical report (PDF or photo).");
     if (file && file.size > 12 * 1024 * 1024 && mode === "upload") return setErr("The file is larger than 12 MB.");
     setBusy(mode);
@@ -155,12 +157,12 @@ function EstimateForm({ projectId, configured, onCreated }: { projectId: string;
         const body = new FormData();
         body.append("file", file!);
         body.append("project", projectId);
-        body.append("plinthAreaSqm", area);
+        if (area) body.append("plinthAreaSqm", area);
         if (depth) body.append("depthM", depth);
         report = await api<GeotechReport>("/geotech", { method: "POST", body });
       } else {
         report = await api<GeotechReport>("/geotech/sample", {
-          method: "POST", json: { project: projectId, plinthAreaSqm: Number(area), depthM: depth ? Number(depth) : null },
+          method: "POST", json: { project: projectId, plinthAreaSqm: area ? Number(area) : null, depthM: depth ? Number(depth) : null },
         });
       }
       onCreated(report);
@@ -177,8 +179,8 @@ function EstimateForm({ projectId, configured, onCreated }: { projectId: string;
         <Dropzone file={file} onFile={setFile} disabled={!!busy} />
         <div className="flex flex-col gap-3">
           <label className="block space-y-1">
-            <span className="text-xs font-medium text-slate-600">Plinth area</span>
-            <UnitInput unit="m²" type="number" min="1" step="any" value={area} onChange={(e) => setArea(e.target.value)} placeholder="e.g. 400" required />
+            <span className="text-xs font-medium text-slate-600">Plinth area <span className="font-normal text-slate-400">(optional)</span></span>
+            <UnitInput unit="m²" type="number" min="1" step="any" value={area} onChange={(e) => setArea(e.target.value)} placeholder="from report, else 400" />
           </label>
           <label className="block space-y-1">
             <span className="text-xs font-medium text-slate-600">Excavation depth <span className="font-normal text-slate-400">(optional)</span></span>
@@ -232,7 +234,7 @@ function History({ reports, selectedId, onSelect }: { reports: GeotechReport[]; 
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">{r.source === "sample" ? "Sample soil profile" : r.file?.originalName}</span>
                     <span className={cx("flex items-center gap-1.5 text-[11px]", active ? "text-slate-300" : "text-slate-500")}>
-                      <span className={cx("h-1.5 w-1.5 rounded-full", s.dot)} />{s.label} · {r.inputs.plinthAreaSqm} m² · {fmtDateTime(r.createdAt)}
+                      <span className={cx("h-1.5 w-1.5 rounded-full", s.dot)} />{s.label}{r.inputs.plinthAreaSqm != null && ` · ${r.inputs.plinthAreaSqm} m²${r.inputs.areaSource === "default" ? " (assumed)" : ""}`} · {fmtDateTime(r.createdAt)}
                     </span>
                   </span>
                 </button>
@@ -628,7 +630,7 @@ function NotRead({ report, onCreated }: { report: GeotechReport; onCreated: (r: 
         <div className="min-w-0 flex-1">
           <h2 className="font-semibold text-slate-900">Report not read: {report.file?.originalName}</h2>
           <p className="mt-1 text-sm text-slate-700">{report.extraction.reason}</p>
-          <p className="mt-1 text-xs text-slate-500">No soil data was invented and no estimate was made. {report.inputs.plinthAreaSqm} m² plinth area is kept for the retry.</p>
+          <p className="mt-1 text-xs text-slate-500">No soil data was invented and no estimate was made.{report.inputs.plinthAreaSqm != null && ` ${report.inputs.plinthAreaSqm} m² plinth area is kept for the retry.`}</p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button onClick={retry} disabled={busy}>{busy ? <><Spinner /> Reading again…</> : <><Icon name="retry" /> Try again</>}</Button>
             {report.file && (
@@ -650,6 +652,7 @@ const STATUS_STYLE: Record<string, { box: string; icon: IconName; title: string 
 };
 
 function Verification({ report, onUpdated }: { report: GeotechReport; onUpdated: (r: GeotechReport) => void }) {
+  const { user } = useAuth();
   const [note, setNote] = useState("");
   const [startDate, setStartDate] = useState(todayInput());
   const [busy, setBusy] = useState(false);
@@ -680,7 +683,7 @@ function Verification({ report, onUpdated }: { report: GeotechReport; onUpdated:
         <span className="text-xs text-slate-600">
           {v.status === "Pending" ? "This estimate is a proposal until a manager or engineer approves it." : `by ${v.by?.name ?? "—"} · ${fmtDateTime(v.at)}${v.note ? ` — “${v.note}”` : ""}`}
         </span>
-        {v.status === "Accepted" && (
+        {v.status === "Accepted" && user && canAccess(user.role, "/plinth-plan") && (
           <Link href="/plinth-plan" className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-sm font-medium text-emerald-800 hover:bg-emerald-100">
             <Icon name="clipboard" /> Open the site plan
           </Link>

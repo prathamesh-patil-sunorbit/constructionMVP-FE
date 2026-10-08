@@ -531,6 +531,12 @@ export const ROLE_LABELS: Record<Role, string> = {
   planning_engineer: "Planning Engineer",
   estimation_engineer: "Estimation Engineer",
 };
+// Demo: roles left out of the login shortcuts and role pickers. Empty to show them again
+// (and HIDDEN_ROLES in backend/src/models/constants.js).
+export const HIDDEN_ROLES: Role[] = ["planning_engineer", "estimation_engineer"];
+export const VISIBLE_ROLE_LABELS = Object.fromEntries(
+  Object.entries(ROLE_LABELS).filter(([k]) => !HIDDEN_ROLES.includes(k as Role)),
+) as Partial<Record<Role, string>>;
 export const isManager = (role?: Role) => role === "admin" || role === "project_manager" || role === "site_manager";
 
 export interface Portfolio {
@@ -759,7 +765,7 @@ export interface GeotechLearnedRate {
 export interface GeotechEstimate {
   soil: { class: SoilClass; label: string; dewatering: boolean; sbcKnM2: number | null; reasons: string[] };
   foundation: { type: FoundationType; source: "report" | "rule" | "assumed"; reason: string; label: string };
-  inputs: { plinthAreaSqm: number; depthM: number; depthSource: "user" | "report" | "default" };
+  inputs: { plinthAreaSqm: number; areaSource?: "user" | "report" | "default"; depthM: number; depthSource: "user" | "report" | "default" };
   excavation: { inSituVolumeM3: number; looseVolumeM3: number; days: number; jcbs: number; ratePerJcbDay: number };
   phases: GeotechPhase[];
   totals: {
@@ -791,7 +797,7 @@ export interface GeotechReport {
   uploadedBy?: User;
   file?: { originalName: string; url: string; mimetype: string; size: number };
   extraction: { status: "Read" | "Not read" | "Sample"; reason?: string; model?: string; facts: GeotechFacts | null };
-  inputs: { plinthAreaSqm: number; depthM: number | null; depthUsedM?: number; depthSource?: string };
+  inputs: { plinthAreaSqm: number | null; areaSource?: "user" | "report" | "default" | null; depthM: number | null; depthUsedM?: number; depthSource?: string };
   estimate: GeotechEstimate | null;
   narration: { summary: string; warnings?: string[]; recommendations: { action: string; rationale: string }[]; aiGenerated: boolean } | null;
   verification: { status: "Pending" | "Accepted" | "Rejected" | "Overridden"; by?: User; at?: string; note?: string };

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { api, useApi } from "@/lib/api";
-import { ROLE_LABELS, type Role, type User } from "@/lib/types";
+import { ROLE_LABELS, VISIBLE_ROLE_LABELS, type Role, type User } from "@/lib/types";
 import { PageHeader } from "@/components/AppShell";
 import { Badge, Button, Card, ErrorBox, Field, Input, Loading, Modal, Select, Table, Td } from "@/components/ui";
 
@@ -33,7 +33,7 @@ function UserForm({ onDone }: { onDone: () => void }) {
       <Field label="Email"><Input type="email" required value={f.email} onChange={set("email")} /></Field>
       <Field label="Password"><Input required value={f.password} onChange={set("password")} /></Field>
       <Field label="Role">
-        <Select value={f.role} onChange={set("role")}>{Object.entries(ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>
+        <Select value={f.role} onChange={set("role")}>{Object.entries(VISIBLE_ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>
       </Field>
       <Field label="Phone"><Input value={f.phone} onChange={set("phone")} /></Field>
       <div className="col-span-2"><ErrorBox message={error} /></div>
@@ -145,7 +145,7 @@ export default function AdminPage() {
                   <Td className="text-slate-600">{u.email}</Td>
                   <Td>
                     <Select value={u.role} onChange={(e) => changeRole(u, e.target.value)} className="w-44">
-                      {Object.entries(ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                      {Object.entries(VISIBLE_ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                     </Select>
                   </Td>
                   <Td><Badge tone={u.active ? "green" : "slate"}>{u.active ? "Active" : "Inactive"}</Badge></Td>

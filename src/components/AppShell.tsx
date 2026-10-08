@@ -2,9 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { homeFor, useAuth } from "@/lib/auth";
-import { api } from "@/lib/api";
 import { canAccess, navFor } from "@/lib/navigation";
 import { ROLE_LABELS, isManager } from "@/lib/types";
 import { Loading } from "./ui";
@@ -13,7 +12,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, ready, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  const [unread, setUnread] = useState(0);
 
   const allowed = !!user && canAccess(user.role, pathname);
 
@@ -21,14 +19,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (ready && !user) router.replace("/login");
     else if (user && !allowed) router.replace(homeFor(user));
   }, [ready, user, allowed, router]);
-
-  useEffect(() => {
-    if (!user) return;
-    const load = () => api<{ unread: number }>("/notifications").then((r) => setUnread(r.unread)).catch(() => {});
-    load();
-    const t = setInterval(load, 30000);
-    return () => clearInterval(t);
-  }, [user, pathname]);
 
   if (!ready || !user || !allowed) return <Loading />;
 
@@ -57,9 +47,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         {n.label}
                         <span className={`block text-[11px] ${active ? "text-slate-300" : "text-slate-400"}`}>{n.hint}</span>
                       </span>
-                      {n.href === "/notifications" && unread > 0 && (
-                        <span className="rounded-full bg-red-500 px-1.5 text-[11px] font-semibold text-white">{unread}</span>
-                      )}
                     </Link>
                   );
                 })}

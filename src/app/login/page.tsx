@@ -9,8 +9,6 @@ const DEMO = [
   { email: "engineer@krisala.test", label: "Site Engineer (Rahul)" },
   { email: "sm@krisala.test", label: "Site Manager (Amit)" },
   { email: "pm@krisala.test", label: "Project Manager (Priya)" },
-  { email: "planning@krisala.test", label: "Planning (Neha)" },
-  { email: "estimation@krisala.test", label: "Estimation (Vikram)" },
   { email: "admin@krisala.test", label: "Admin" },
 ];
 
