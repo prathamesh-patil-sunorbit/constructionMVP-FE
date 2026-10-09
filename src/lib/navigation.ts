@@ -28,16 +28,18 @@ const plinthPlan = item("/plinth-plan", "Plinth Plan", "Day-by-day site checklis
 const siteReports = item("/site-reports", "Site Reports", "Daily site DPR");
 const auditTrail = item("/audit", "Audit Trail", "Who changed what");
 const admin = item("/admin", "Users & Rules", "Users, roles, thresholds");
+const schedule = item("/schedule", "MPP Schedule", "Upload .mpp / .xlsx, every task");
+const mppTasks = item("/mpp-tasks", "MPP Tasks", "Schedule tasks day by day");
 
 // Sidebar per role: each role only sees the screens it works with.
 export const NAV_BY_ROLE: Record<Role, NavSection[]> = {
   site_engineer: [
-    { title: "My work", items: [today("My Day"), plinthPlan, siteReports, blockers("My Blockers")] },
+    { title: "My work", items: [today("My Day"), mppTasks, plinthPlan, siteReports, blockers("My Blockers")] },
     { title: "Site", items: [projects("Project Activities"), model3d] },
   ],
   site_manager: [
     { title: "Monitor", items: [dashboard, today("Site Plan"), blockers(), risks] },
-    { title: "Site", items: [projects("Project Activities"), geotech, plinthPlan, siteReports] },
+    { title: "Site", items: [projects("Project Activities"), schedule, geotech, plinthPlan, siteReports] },
     { title: "Intelligence", items: [aiInsights, copilot, model3d] },
   ],
   project_manager: [
@@ -57,7 +59,7 @@ export const NAV_BY_ROLE: Record<Role, NavSection[]> = {
     { title: "Estimation data", items: [teams] },
   ],
   admin: [
-    { title: "Overview", items: [dashboard, projects()] },
+    { title: "Overview", items: [dashboard, projects(), schedule, mppTasks] },
     { title: "Intelligence", items: [aiInsights, copilot, geotech, model3d, planCheck, reports] },
     { title: "Setup", items: [admin, teams] },
     { title: "Records", items: [risks, blockers(), plinthPlan, siteReports, auditTrail] },

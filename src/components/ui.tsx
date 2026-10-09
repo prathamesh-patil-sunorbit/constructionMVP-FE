@@ -98,7 +98,7 @@ export function ErrorBox({ message }: { message?: string | null }) {
   return <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{message}</div>;
 }
 
-export function Modal({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+export function Modal({ open, onClose, title, children, wide }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode; wide?: boolean }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     if (open) window.addEventListener("keydown", onKey);
@@ -107,7 +107,7 @@ export function Modal({ open, onClose, title, children }: { open: boolean; onClo
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 pt-16" onMouseDown={onClose}>
-      <div className="w-full max-w-lg rounded-xl bg-white shadow-xl" onMouseDown={(e) => e.stopPropagation()}>
+      <div className={cx("w-full rounded-xl bg-white shadow-xl", wide ? "max-w-2xl" : "max-w-lg")} onMouseDown={(e) => e.stopPropagation()}>
         <header className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
           <h3 className="font-semibold">{title}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700" aria-label="Close">✕</button>

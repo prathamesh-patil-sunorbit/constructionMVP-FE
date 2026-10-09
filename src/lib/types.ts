@@ -888,3 +888,92 @@ export interface PlinthPlan {
   summary: { totalDays: number; doneDays: number; behindDays: number; items: number; itemsDone: number; percent: number; todayDay: number | null };
   days: PlinthDay[];
 }
+
+// ---------- MS Project schedule ----------
+export type ScheduleTaskStatus = "Completed" | "In Progress" | "Overdue" | "Not Started";
+export interface ScheduleTask {
+  uid: number;
+  wbs: string | null;
+  level: number;
+  parentUid: number | null;
+  name: string;
+  summary: boolean;
+  milestone: boolean;
+  critical: boolean;
+  start: string | null;
+  finish: string | null;
+  baselineStart: string | null;
+  baselineFinish: string | null;
+  actualStart: string | null;
+  actualFinish: string | null;
+  durationDays: number | null;
+  baselineDurationDays: number | null;
+  percent: number;
+  totalSlackDays: number | null;
+  predecessors: { uid: number; type: string; lagDays: number }[];
+  resources: string[];
+  path: string[];
+  finishVarianceDays: number | null;
+  startVarianceDays: number | null;
+  status: ScheduleTaskStatus;
+  materials?: ScheduleMaterial[];
+  cost?: number | null;
+  baselineCost?: number | null;
+  actualCost?: number | null;
+  remainingCost?: number | null;
+  actualDurationDays?: number | null;
+  remainingDurationDays?: number | null;
+  freeSlackDays?: number | null;
+  earlyStart?: string | null;
+  earlyFinish?: string | null;
+  lateStart?: string | null;
+  lateFinish?: string | null;
+  plannedPercent?: number | null;
+  constraint?: { type: string; date: string | null } | null;
+  note?: string | null;
+}
+export interface ScheduleMaterial {
+  name: string; unit: string | null; quantity: number; actualQuantity: number; remainingQuantity: number;
+  cost: number | null; actualCost: number | null; perDay?: number; tasks?: number;
+}
+export interface ScheduleSummary {
+  tasks: number; workTasks: number; summaries: number; milestones: number; critical: number;
+  completed: number; inProgress: number; overdue: number; notStarted: number; percent: number;
+  start: string | null; finish: string | null; baselineFinish: string | null; delayDays: number | null;
+  startingThisWeek: number; resources: string[];
+  materials?: ScheduleMaterial[]; cost?: number | null; baselineCost?: number | null; actualCost?: number | null;
+  remainingCost?: number | null; behindPlan?: number;
+}
+export interface ScheduleImport {
+  _id: string;
+  project: string;
+  uploadedBy?: User;
+  file: { originalName: string; url: string; size: number };
+  format: "mpp" | "xlsx";
+  title: string | null;
+  sheet?: string;
+  statusDate: string | null;
+  author: string | null;
+  application: string | null;
+  workDaysPerWeek: number;
+  summary: ScheduleSummary;
+  tasks?: ScheduleTask[];
+  createdAt: string;
+}
+export interface DayTask {
+  uid: number; wbs: string | null; name: string; path: string[]; start: string; finish: string;
+  baselineStart: string | null; baselineFinish: string | null; actualStart: string | null;
+  durationDays: number | null; percent: number; status: ScheduleTaskStatus; critical: boolean; milestone: boolean;
+  finishVarianceDays: number | null; resources: string[];
+  predecessors: { uid: number; type: string; lagDays: number; name: string | null; status: ScheduleTaskStatus | null }[];
+  dayNo: number | null; totalDays: number; expectedPercent: number | null; isStart: boolean; isFinish: boolean; daysLate?: number;
+  materials: ScheduleMaterial[]; remainingDurationDays: number | null; totalSlackDays: number | null; note: string | null;
+  cost: number | null; actualCost: number | null; constraint: { type: string; date: string | null } | null;
+}
+export interface DayTasks {
+  import: Omit<ScheduleImport, "tasks"> | null;
+  from: string;
+  days: { date: string; workDay: boolean; tasks: DayTask[]; starting: number; finishing: number }[];
+  overdue: DayTask[];
+  workDaysPerWeek: number;
+}
