@@ -6,6 +6,7 @@ import { fmtDateTime } from "@/lib/format";
 import type { Project, ScheduleImport, ScheduleTask, ScheduleTaskStatus } from "@/lib/types";
 import { Button, ErrorBox, Loading, Modal, Select } from "@/components/ui";
 import { Icon, Spinner } from "@/components/geotech";
+import { CostBreakdown, SchedulePlanner } from "@/components/schedule-planner";
 import { Field, MaterialTable, PercentBar, STATUS_STYLE, TaskStatus, Variance, cx, fmtD, fmtDays, inr, linkText } from "@/components/schedule";
 
 const STATUSES: ScheduleTaskStatus[] = ["Overdue", "In Progress", "Not Started", "Completed"];
@@ -114,17 +115,44 @@ function Versions({ imports, selected, onSelect }: { imports: ScheduleImport[] |
 
 // ---------------------------------------------------------------------------
 
+const TABS = [
+  { key: "overview", label: "Overview" },
+  { key: "tasks", label: "All tasks" },
+  { key: "cost", label: "Cost" },
+  { key: "ai", label: "AI planner" },
+] as const;
+
 function ScheduleView({ id, onDeleted }: { id: string; onDeleted: () => void }) {
   const { data: doc, error } = useApi<ScheduleImport>(`/schedule/imports/${id}`);
   const [open, setOpen] = useState<ScheduleTask | null>(null);
+  const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("overview");
   if (error) return <ErrorBox message={error} />;
   if (!doc?.tasks) return <Loading />;
+  const mpp = doc.format === "mpp";
   return (
     <div className="space-y-5">
       <Overview doc={doc} onDeleted={onDeleted} />
-      <BudgetAndMaterials doc={doc} />
-      <NowOnSite tasks={doc.tasks} onOpen={setOpen} />
-      <TaskTable doc={doc} onOpen={setOpen} />
+      <nav className="flex gap-1 rounded-xl bg-slate-100 p-1">
+        {TABS.map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)} className={cx("flex-1 rounded-lg px-3 py-2 text-sm font-medium transition", tab === t.key ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900")}>
+            {t.key === "ai" && <Icon name="sparkles" className="mr-1.5 inline h-4 w-4 text-violet-600" />}{t.label}
+          </button>
+        ))}
+      </nav>
+      {tab === "overview" && (
+        <>
+          <BudgetAndMaterials doc={doc} />
+          <NowOnSite tasks={doc.tasks} onOpen={setOpen} />
+        </>
+      )}
+      {tab === "tasks" && <TaskTable doc={doc} onOpen={setOpen} />}
+      {(tab === "cost" || tab === "ai") && !mpp && (
+        <p className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
+          The Excel export has no costs or task links. Upload the <b>.mpp</b> file to see the cost breakdown and use the AI planner.
+        </p>
+      )}
+      {tab === "cost" && mpp && <CostBreakdown doc={doc} />}
+      {tab === "ai" && mpp && <SchedulePlanner doc={doc} />}
       <TaskModal task={open} tasks={doc.tasks} onClose={() => setOpen(null)} />
     </div>
   );

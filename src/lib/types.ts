@@ -977,3 +977,41 @@ export interface DayTasks {
   overdue: DayTask[];
   workDaysPerWeek: number;
 }
+
+// ---------- Schedule AI planner ----------
+export interface ScenarioInput { labourPct: number; overlapPct: number; scope: { areas?: number[]; packages?: string[]; criticalOnly?: boolean } }
+export interface ScenarioResult {
+  scenario: ScenarioInput;
+  finish: string;
+  baseFinish: string;
+  workDaysSaved: number;
+  calendarDaysSaved: number;
+  tasksSpedUp: number;
+  linksOverlapped: number;
+  criticalTasks: number;
+  cost: { extraLabourCost: number; reworkCost: number; overheadSaving: number; net: number };
+  criticalPath: { uid: number; name: string; wbs: string | null; area: string | null }[];
+  assumptions: string[];
+}
+export interface CostRow {
+  uid: number; name: string; cost: number | null; baselineCost: number | null; actualCost: number; remainingCost: number | null;
+  percent: number; start: string | null; finish: string | null; finishVarianceDays: number | null;
+}
+export interface SchedulePlan {
+  pace: { spi: number | null; tasksMeasured: number; behind: number; scheduledFinish: string; predictedFinish: string; extraDays: number; basis: string };
+  costs: { areas: (CostRow & { packages: CostRow[] })[] };
+  base: ScenarioResult;
+  scenarios: { key: string; label: string; scenario: ScenarioInput; result: ScenarioResult }[];
+  options: { areas: { uid: number; name: string }[]; packages: string[] };
+  advice: ScheduleAdvice | null;
+  rules: { labourEfficiency: number; maxCompression: number; maxOverlap: number; labourShareOfCost: number; overlapReworkShare: number; siteOverheadPerDay: number };
+}
+export interface ScheduleAdvice {
+  headline: string;
+  situation: string;
+  recommendations: { action: string; scenarioKey?: string; rationale: string; prerequisites?: string }[];
+  risks?: string[];
+  aiGenerated: boolean;
+  model?: string;
+  at: string;
+}
