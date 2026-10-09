@@ -25,7 +25,7 @@ export default function SchedulePage() {
     <div className="space-y-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">MPP Schedule</h1>
+          <h1 className="text-xl font-semibold text-slate-900">MSP Schedule</h1>
           <p className="text-sm text-slate-500">Upload the Microsoft Project schedule (.mpp) or its Excel export (.xlsx) and see every task, date and delay.</p>
         </div>
         {projects.length > 1 && (

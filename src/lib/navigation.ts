@@ -28,8 +28,8 @@ const plinthPlan = item("/plinth-plan", "Plinth Plan", "Day-by-day site checklis
 const siteReports = item("/site-reports", "Site Reports", "Daily site DPR");
 const auditTrail = item("/audit", "Audit Trail", "Who changed what");
 const admin = item("/admin", "Users & Rules", "Users, roles, thresholds");
-const schedule = item("/schedule", "MPP Schedule", "Upload .mpp / .xlsx, every task");
-const mppTasks = item("/mpp-tasks", "MPP Tasks", "Schedule tasks day by day");
+const schedule = item("/schedule", "MSP Schedule", "Upload .mpp / .xlsx, every task");
+const mppTasks = item("/mpp-tasks", "MSP Tasks", "Schedule tasks day by day");
 
 // Sidebar per role: each role only sees the screens it works with.
 export const NAV_BY_ROLE: Record<Role, NavSection[]> = {

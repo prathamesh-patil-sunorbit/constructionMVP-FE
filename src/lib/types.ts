@@ -984,7 +984,7 @@ export interface DayTask {
 export interface DayTasks {
   import: Omit<ScheduleImport, "tasks"> | null;
   from: string;
-  days: { date: string; workDay: boolean; tasks: DayTask[]; starting: number; finishing: number }[];
+  days: { date: string; workDay: boolean; holiday?: string | null; tasks: DayTask[]; starting: number; finishing: number }[];
   overdue: DayTask[];
   workDaysPerWeek: number;
 }
