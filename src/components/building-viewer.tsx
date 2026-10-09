@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Bounds, ContactShadows, Edges, OrbitControls, Sky } from "@react-three/drei";
-import { CanvasTexture, DoubleSide, RepeatWrapping, SRGBColorSpace } from "three";
+import { CanvasTexture, DoubleSide, Euler, InstancedMesh, Matrix4, Quaternion, RepeatWrapping, SRGBColorSpace, Vector3 } from "three";
 import type { BuildingModel } from "@/lib/types";
 import { Badge, Button, Card, Empty, HealthBadge } from "./ui";
 import { CalculatedMark } from "./ai";
@@ -23,6 +23,28 @@ const GRASS = "#5f8f3e";
 const ASPHALT = "#9a9388";
 const PARAPET = "#e8d4b0";
 const MEP = "#5b8def";
+
+// One colour per building service, as a coordinated MEP model shows them.
+const SYSTEMS: { key: string; label: string; color: string }[] = [
+  { key: "supply", label: "AC supply duct", color: "#f97316" },
+  { key: "return", label: "Return air duct", color: "#facc15" },
+  { key: "exhaust", label: "Toilet exhaust", color: "#22d3ee" },
+  { key: "sprinkler", label: "Fire sprinkler", color: "#db2777" },
+  { key: "cold", label: "Cold water", color: "#2563eb" },
+  { key: "hot", label: "Hot water", color: "#dc2626" },
+  { key: "drain", label: "Drainage", color: "#3f3f46" },
+  { key: "conduit", label: "Electrical conduit", color: "#8b5cf6" },
+  { key: "tray", label: "Cable tray", color: "#14b8a6" },
+  { key: "diffuser", label: "Diffusers", color: "#e2e8f0" },
+];
+const SYSTEM_COLOR: Record<string, string> = Object.fromEntries(SYSTEMS.map((s) => [s.key, s.color]));
+// Slab progress view: what a floor shows once cast, while casting, and before it is built.
+type Stage = "built" | "casting" | "ghost";
+const GHOST_KEEP = new Set(["slab", "wall", "column"]);
+const CAST_KEEP = new Set(["slab", "column"]);
+const CASTING = "#f59e0b";
+// What stays on screen, as a grey ghost, in the MEP view.
+const XRAY_SHELL = new Set(["wall", "parapet", "slab", "column", "shaft", "base"]);
 
 function progressAt(activity: BuildingModel["activities"][number], day: Date) {
   const hist = activity.history.filter((h) => new Date(h.date) <= day);
@@ -119,14 +141,17 @@ function appearance(type: string, wallColor: string, night: boolean, selected: b
       return { color: "#b9b3a8", roughness: 0.72, metalness: 0.06, opacity: 1, emissive: "#000", emissiveIntensity: 0 };
     case "shaft":
       return { color: "#d5dbe6", roughness: 0.25, metalness: 0.12, opacity: 0.22, emissive: "#000", emissiveIntensity: 0 };
+    case "supply":
+    case "return":
+    case "exhaust":
+    case "sprinkler":
     case "cold":
-      return { color: "#2f6bff", roughness: 0.32, metalness: 0.5, opacity: 1, emissive: "#000", emissiveIntensity: 0 };
     case "hot":
-      return { color: "#e11d2e", roughness: 0.32, metalness: 0.45, opacity: 1, emissive: "#000", emissiveIntensity: 0 };
     case "drain":
-      return { color: "#3f3f46", roughness: 0.4, metalness: 0.3, opacity: 1, emissive: "#000", emissiveIntensity: 0 };
     case "conduit":
-      return { color: "#f5c542", roughness: 0.38, metalness: 0.22, opacity: 1, emissive: "#000", emissiveIntensity: 0 };
+    case "tray":
+    case "diffuser":
+      return { color: SYSTEM_COLOR[type], roughness: 0.35, metalness: 0.35, opacity: 1, emissive: "#000", emissiveIntensity: 0 };
     case "board":
       return { color: "#f8fafc", roughness: 0.45, metalness: 0.25, opacity: 1, emissive: "#000", emissiveIntensity: 0 };
     case "tile":
@@ -144,7 +169,7 @@ function lookType(c: BuildingModel["components"][number]) {
   if (c.subtype === "glass" || c.subtype === "fin" || c.subtype === "marker" || c.subtype === "lift" || c.subtype === "gold" || c.subtype === "pool") return c.subtype;
   if (c.type === "furniture" && c.subtype) return c.subtype;
   if (c.skin === "podium" && (c.type === "wall" || c.type === "parapet" || c.type === "band" || c.type === "column")) return "podium";
-  if (c.subtype === "cold" || c.subtype === "hot" || c.subtype === "drain" || c.subtype === "conduit" || c.subtype === "board" || c.subtype === "tile") return c.subtype;
+  if ((c.subtype && SYSTEM_COLOR[c.subtype]) || c.subtype === "board" || c.subtype === "tile") return c.subtype;
   if (c.type === "beam" || c.type === "shaft" || c.type === "pipe") return c.type === "pipe" ? (c.subtype || "mep") : c.type;
   if (c.category === "mep" && c.type === "column") return "mep";
   if (c.subtype === "trunk") return "trunk";
@@ -166,7 +191,7 @@ function PartGeometry({ c }: { c: BuildingModel["components"][number] }) {
   const cubic = Math.abs(sx - sy) < 0.12 && Math.abs(sy - sz) < 0.12;
   if (c.type === "tree" && c.subtype === "crown") return <sphereGeometry args={[Math.max(sx, sy, sz) / 2, 18, 14]} />;
   if (c.type === "tree" || c.subtype === "trunk") return <cylinderGeometry args={[sx / 2, sx / 2.3, sy, 8]} />;
-  if (c.type === "pipe" || c.subtype === "cold" || c.subtype === "hot" || c.subtype === "drain" || c.subtype === "conduit") {
+  if (c.type === "pipe") {
     return <cylinderGeometry args={[sx / 2, sx / 2, sy, 12]} />;
   }
   if (c.type === "column" && c.category !== "mep") return <cylinderGeometry args={[sx / 2, sx / 2, sy, 8]} />;
@@ -645,7 +670,7 @@ function FurnitureShape({ subtype, size, opacity, selected }: { subtype?: string
 }
 
 function Part({
-  c, model, day, explode, night, fourD, bim, selected, wallColor, simple, onSelect,
+  c, model, day, explode, night, fourD, bim, xray = false, stage, selected, wallColor, simple, onSelect,
 }: {
   c: BuildingModel["components"][number];
   model: BuildingModel;
@@ -654,6 +679,8 @@ function Part({
   night: boolean;
   fourD: boolean;
   bim: boolean;
+  xray?: boolean;
+  stage?: Stage;
   selected: boolean;
   wallColor: string;
   simple: boolean;
@@ -666,6 +693,7 @@ function Part({
   const ghost = fourD && p !== null && p < 100 && p >= 8 && !siteAlways;
   const look = appearance(lookType(c), wallColor, night, selected);
   if (c.color && !selected) look.color = c.color;
+  if (stage === "casting" && !selected) look.color = CASTING;
   const shell = bim && (c.type === "wall" || c.type === "parapet");
   const opacity = !built ? 0 : shell ? 0.2 : ghost ? Math.max(0.4, (p || 0) / 100) : look.opacity;
   if (!built) return null;
@@ -676,6 +704,39 @@ function Part({
     e.stopPropagation();
     onSelect(c.id);
   };
+
+  if (stage === "ghost" && !selected) {
+    return (
+      <mesh position={[c.position[0], y, c.position[2]]} rotation={c.rotation || [0, 0, 0]} onClick={click}>
+        <PartGeometry c={c} />
+        <meshStandardMaterial
+          color={night ? "#94a3b8" : "#bcd3e6"}
+          roughness={0.2}
+          metalness={0.1}
+          transparent
+          opacity={c.type === "slab" ? 0.12 : 0.045}
+          depthWrite={false}
+        />
+        {c.type === "slab" && <Edges threshold={22} color={night ? "#64748b" : "#8fb3d1"} />}
+      </mesh>
+    );
+  }
+
+  if (xray && !selected && c.category !== "mep") {
+    return (
+      <mesh position={[c.position[0], y, c.position[2]]} rotation={c.rotation || [0, 0, 0]} onClick={click}>
+        <PartGeometry c={c} />
+        <meshStandardMaterial
+          color={night ? "#64748b" : "#cfd6df"}
+          roughness={0.9}
+          transparent
+          opacity={c.type === "shaft" ? 0.18 : simple ? 0.02 : c.type === "slab" ? 0.08 : 0.13}
+          depthWrite={false}
+        />
+        {(c.type === "slab" || (!simple && c.type === "wall")) && <Edges threshold={22} color={night ? "#475569" : "#a3adba"} />}
+      </mesh>
+    );
+  }
 
   if (simple && (c.type === "window" || c.type === "door" || c.type === "furniture")) {
     return (
@@ -746,6 +807,87 @@ function Part({
       {edged && !simple && <Edges threshold={22} color={c.type === "shaft" ? "#64748b" : "#9a8466"} />}
     </mesh>
   );
+}
+
+type Comp = BuildingModel["components"][number];
+
+// Thousands of pipes and ducts: one instanced draw call per service, not one mesh each.
+function MepBatch({ kind, color, items, explode, night, onSelect }: {
+  kind: "pipe" | "box"; color: string; items: Comp[]; explode: boolean; night: boolean; onSelect: (id: string) => void;
+}) {
+  const ref = useRef<InstancedMesh>(null);
+  useLayoutEffect(() => {
+    const mesh = ref.current;
+    if (!mesh) return;
+    const m = new Matrix4();
+    const q = new Quaternion();
+    const e = new Euler();
+    const p = new Vector3();
+    const s = new Vector3();
+    items.forEach((c, i) => {
+      p.set(c.position[0], c.position[1] + (explode && c.floorIndex >= 0 ? c.floorIndex * 1.8 : 0), c.position[2]);
+      const [rx, ry, rz] = c.rotation || [0, 0, 0];
+      q.setFromEuler(e.set(rx, ry, rz));
+      s.set(c.size[0], c.size[1], c.size[2]);
+      mesh.setMatrixAt(i, m.compose(p, q, s));
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.computeBoundingSphere();
+  }, [items, explode]);
+  return (
+    <instancedMesh
+      key={items.length}
+      ref={ref}
+      args={[undefined, undefined, items.length]}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (e.instanceId != null && items[e.instanceId]) onSelect(items[e.instanceId].id);
+      }}
+    >
+      {kind === "pipe" ? <cylinderGeometry args={[0.5, 0.5, 1, 10]} /> : <boxGeometry args={[1, 1, 1]} />}
+      <meshStandardMaterial color={color} roughness={0.35} metalness={0.3} emissive={color} emissiveIntensity={night ? 0.55 : 0.12} />
+    </instancedMesh>
+  );
+}
+
+function MepNetwork({ items, explode, night, onSelect }: { items: Comp[]; explode: boolean; night: boolean; onSelect: (id: string) => void }) {
+  const batches = useMemo(() => {
+    const by = new Map<string, { kind: "pipe" | "box"; color: string; items: Comp[] }>();
+    for (const c of items) {
+      const kind = c.type === "pipe" ? "pipe" : "box";
+      const key = `${kind}:${c.subtype}`;
+      if (!by.has(key)) by.set(key, { kind, color: SYSTEM_COLOR[c.subtype || ""] || MEP, items: [] });
+      by.get(key)!.items.push(c);
+    }
+    return [...by.entries()];
+  }, [items]);
+  return (
+    <>
+      {batches.map(([key, b]) => (
+        <MepBatch key={key} kind={b.kind} color={b.color} items={b.items} explode={explode} night={night} onSelect={onSelect} />
+      ))}
+    </>
+  );
+}
+
+// Isometric, from above a front corner: the whole tower, or one floor plate when `floorY` is set.
+function MepCamera({ active, floorY, model }: { active: boolean; floorY: number | null; model: BuildingModel }) {
+  const camera = useThree((s) => s.camera);
+  const controls = useThree((s) => s.controls) as { target: { set: (x: number, y: number, z: number) => void }; update: () => void } | null;
+  useEffect(() => {
+    if (!active) return;
+    const { plateWidthM: w, plateDepthM: d, totalHeightM: h } = model.dimensions;
+    if (floorY === null) {
+      camera.position.set(w * 1.35, h * 0.95, -d * 2.4);
+      controls?.target.set(w / 2, h * 0.42, d / 2);
+    } else {
+      const span = Math.max(w, d);
+      camera.position.set(w / 2 + span * 0.75, floorY + span * 0.95, d / 2 - span * 0.95);
+      controls?.target.set(w / 2, floorY + 1, d / 2);
+    }
+    controls?.update();
+  }, [active, floorY, camera, controls, model.dimensions]);
+  return null;
 }
 
 type FlatHit = {
@@ -873,12 +1015,27 @@ export function BuildingViewer({ model }: { model: BuildingModel }) {
   const [night, setNight] = useState(false);
   const [fourD, setFourD] = useState(false);
   const [bim, setBim] = useState(false);
+  const [mep, setMep] = useState(false);
+  // Share of storeys whose slab is cast, 0-100. null = the slab progress view is off.
+  const [slabPct, setSlabPct] = useState<number | null>(null);
+  const [offSystems, setOffSystems] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<string | null>(null);
   const [flatMode, setFlatMode] = useState(false);
   const [openFlat, setOpenFlat] = useState<FlatHit | null>(null);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const [nearFloors, setNearFloors] = useState<number[] | null>(null);
   const wallColor = String(model.spec.wallColor || WALL);
+  const levelCount = model.towers[0]?.floors.length ?? 0;
+  const castCount = slabPct === null ? levelCount : Math.round((slabPct / 100) * levelCount);
+  const stageOf = useCallback((c: Comp): Stage => {
+    if (slabPct === null || c.floorIndex < 0) return "built";
+    return c.floorIndex < castCount ? "built" : c.floorIndex === castCount ? "casting" : "ghost";
+  }, [slabPct, castCount]);
+  const mepFloorY = useMemo(() => {
+    if (floor === "all") return null;
+    const i = (model.towers[0]?.floors ?? []).findIndex((f) => f.name === floor);
+    return i < 0 ? null : i * model.dimensions.floorHeightM;
+  }, [floor, model]);
   const canvasWrap = useRef<HTMLDivElement>(null);
   const flats = useMemo(() => flatHitsOf(model), [model]);
   const zoomed = Boolean(nearFloors?.length) && floor === "all" && !openFlat;
@@ -888,11 +1045,23 @@ export function BuildingViewer({ model }: { model: BuildingModel }) {
   }, []);
   const visible = useMemo(() => model.components.filter((c) => {
     if (hidden[c.category]) return false;
-    if (c.engineering && !bim) return false;
+    if (c.engineering && !bim && !mep) return false;
+    if (slabPct !== null) {
+      // Fins and crowns are cladding, fixed after the frame is up.
+      if (c.type === "fin" || c.subtype === "gold") return false;
+      const st = stageOf(c);
+      if (st === "ghost" && !GHOST_KEEP.has(c.type)) return false;
+      if (st === "casting" && !CAST_KEEP.has(c.type)) return false;
+    }
     if (bim && cutAway(c)) return false;
+    if (mep) {
+      if (c.category === "mep" ? c.type === "light" || (c.subtype && offSystems[c.subtype]) : !XRAY_SHELL.has(c.type)) return false;
+      // Thirty storeys of stacked ghost walls read as solid grey. The whole-building view keeps floor plates only.
+      if (floor === "all" && !zoomed && (c.type === "wall" || c.type === "parapet")) return false;
+    }
     const interior = Boolean(c.unit) || c.type === "furniture" || c.type === "stair" || c.subtype === "lift";
     const near = zoomed && nearFloors!.includes(c.floorIndex);
-    if (!showInterior && (interior || (c.label && /core |stair hall|corridor/.test(c.label)))) return false;
+    if (!showInterior && (interior || (!c.engineering && c.label && /core |stair hall|corridor/.test(c.label)))) return false;
     if (openFlat) {
       if (c.floorName && c.floorName !== openFlat.floorName) return false;
       if (c.unit && c.unit !== openFlat.unit) return false;
@@ -905,7 +1074,17 @@ export function BuildingViewer({ model }: { model: BuildingModel }) {
     if (near && c.side === "front" && (FACADE.has(c.type) || c.type === "balcony" || c.type === "railing")) return false;
     if (near && (c.type === "slab" || c.type === "fin")) return false;
     return true;
-  }), [model, hidden, bim, floor, openFlat, showInterior, zoomed, nearFloors]);
+  }), [model, hidden, bim, mep, offSystems, slabPct, stageOf, floor, openFlat, showInterior, zoomed, nearFloors]);
+  // In the MEP view the pipes and ducts go to the instanced layer. The selected one stays a normal part so it highlights.
+  const services = useMemo(
+    () => (mep ? visible.filter((c) => (c.type === "pipe" || c.type === "duct") && c.id !== selected) : []),
+    [mep, visible, selected],
+  );
+  const parts = useMemo(() => {
+    if (!mep) return visible;
+    const batched = new Set(services.map((c) => c.id));
+    return visible.filter((c) => !batched.has(c.id));
+  }, [mep, visible, services]);
 
   const wheelRef = useRef({ active: () => false, go: (_dir: number) => {} });
   wheelRef.current.active = () => Boolean(openFlat || hoverKey);
@@ -1006,7 +1185,9 @@ export function BuildingViewer({ model }: { model: BuildingModel }) {
           <Button variant="ghost" onClick={() => setExplode(!explode)}>{explode ? "Collapse" : "Explode floors"}</Button>
           <Button variant="ghost" onClick={() => setNight(!night)}>{night ? "Day" : "Night"}</Button>
           <Button variant={fourD ? "secondary" : "ghost"} onClick={() => setFourD(!fourD)}>{fourD ? "4D progress on" : "4D progress"}</Button>
-          <Button variant={bim ? "secondary" : "ghost"} onClick={() => setBim(!bim)}>{bim ? "Close engineering view" : "Engineering cutaway"}</Button>
+          <Button variant={bim ? "secondary" : "ghost"} onClick={() => { setBim(!bim); setMep(false); }}>{bim ? "Close engineering view" : "Engineering cutaway"}</Button>
+          <Button variant={mep ? "secondary" : "ghost"} onClick={() => { setMep(!mep); setBim(false); setSlabPct(null); setFlatMode(false); setOpenFlat(null); }}>{mep ? "Close MEP view" : "MEP services"}</Button>
+          <Button variant={slabPct !== null ? "secondary" : "ghost"} onClick={() => { setSlabPct(slabPct === null ? 50 : null); setMep(false); setBim(false); }}>{slabPct !== null ? "Close slab progress" : "Slab progress"}</Button>
         </div>
         <div ref={canvasWrap} className={`relative h-[560px] overflow-hidden rounded-lg ${night ? "bg-[#0b1220]" : "bg-gradient-to-b from-sky-200 to-emerald-100"}`}>
           <Canvas shadows={showInterior} dpr={[1, 1.25]} camera={{ position: [70, 48, 78], fov: 32 }} onPointerMissed={() => setSelected(null)}>
@@ -1033,15 +1214,17 @@ export function BuildingViewer({ model }: { model: BuildingModel }) {
             ))}
             <mesh rotation={[-Math.PI / 2, 0, 0]} position={[model.dimensions.plateWidthM / 2, -0.03, model.dimensions.plateDepthM / 2]} receiveShadow>
               <planeGeometry args={[Math.max(180, model.dimensions.totalHeightM * 3), Math.max(180, model.dimensions.totalHeightM * 3)]} />
-              <meshStandardMaterial color={night ? "#152414" : GRASS} roughness={1} />
+              <meshStandardMaterial color={mep ? (night ? "#1e293b" : "#e8ecf1") : night ? "#152414" : GRASS} roughness={1} />
             </mesh>
             <ZoomWatch floorHeight={model.dimensions.floorHeightM} enabled={floor === "all" && !openFlat && !flatMode} onNear={onNear} />
             <CutawayCamera active={bim} model={model} />
-            <FloorPlanCamera floor={openFlat ? "all" : floor} model={model} />
+            <MepCamera active={mep} floorY={mepFloorY} model={model} />
+            <FloorPlanCamera floor={openFlat || mep ? "all" : floor} model={model} />
             <FlatCamera flat={openFlat} />
-            <Bounds fit observe={!bim && floor === "all" && !openFlat} margin={1.25}>
+            <Bounds fit observe={!bim && !mep && floor === "all" && !openFlat} margin={1.25}>
               <group>
-                {visible.map((c) => (
+                {mep && <MepNetwork items={services} explode={explode} night={night} onSelect={setSelected} />}
+                {parts.map((c) => (
                   <Part
                     key={c.id}
                     c={c}
@@ -1051,6 +1234,8 @@ export function BuildingViewer({ model }: { model: BuildingModel }) {
                     night={night}
                     fourD={fourD}
                     bim={bim}
+                    xray={mep}
+                    stage={stageOf(c)}
                     selected={selected === c.id}
                     wallColor={wallColor}
                     simple={!showInterior || (zoomed && !nearFloors?.includes(c.floorIndex))}
@@ -1074,13 +1259,45 @@ export function BuildingViewer({ model }: { model: BuildingModel }) {
             <ContactShadows position={[model.dimensions.plateWidthM / 2, 0, model.dimensions.plateDepthM / 2]} opacity={0.28} scale={Math.max(90, model.dimensions.plateWidthM * 2)} blur={2.2} far={28} />
             <OrbitControls makeDefault enableZoom={!flatMode || (!openFlat && !hoverKey)} minDistance={4} maxDistance={Math.max(240, model.dimensions.totalHeightM * 4)} maxPolarAngle={Math.PI / 2.05} />
           </Canvas>
+          {slabPct !== null && (
+            <div className="absolute left-3 top-3 w-64 rounded-md border border-slate-300 bg-white/95 px-3 py-2 text-[11px] text-slate-700 shadow">
+              <div className="mb-1 font-semibold tracking-wide">SLAB PROGRESS</div>
+              <div className="text-2xl font-semibold text-slate-900">{slabPct}%</div>
+              <div className="mb-2 text-slate-500">
+                {Math.min(castCount, levelCount)} of {levelCount} slabs cast
+                {castCount < levelCount ? ` · ${model.towers[0]?.floors[castCount]?.name} in progress` : " · frame complete"}
+              </div>
+              <input type="range" min={0} max={100} value={slabPct} onChange={(e) => setSlabPct(Number(e.target.value))} className="w-full" />
+              <div className="mt-2 space-y-0.5">
+                <div><span className="mr-1 inline-block h-2 w-2 rounded-sm align-middle" style={{ background: CONCRETE }} /> Cast</div>
+                <div><span className="mr-1 inline-block h-2 w-2 rounded-sm align-middle" style={{ background: CASTING }} /> Being cast</div>
+                <div><span className="mr-1 inline-block h-2 w-2 rounded-sm align-middle ring-1 ring-sky-300" style={{ background: "#e0ecf5" }} /> Still to build</div>
+              </div>
+            </div>
+          )}
+          {mep && (
+            <div className="absolute left-3 top-3 rounded-md border border-slate-300 bg-white/95 px-3 py-2 text-[11px] text-slate-700 shadow">
+              <div className="mb-1 font-semibold tracking-wide">MEP SERVICES</div>
+              {SYSTEMS.map((sys) => (
+                <button
+                  key={sys.key}
+                  onClick={() => setOffSystems({ ...offSystems, [sys.key]: !offSystems[sys.key] })}
+                  className={`flex items-center gap-1.5 py-0.5 text-left ${offSystems[sys.key] ? "text-slate-400 line-through" : ""}`}
+                >
+                  <span className="inline-block h-2 w-2 rounded-sm ring-1 ring-slate-300" style={{ background: offSystems[sys.key] ? "transparent" : sys.color }} />
+                  {sys.label}
+                </button>
+              ))}
+              <div className="mt-1 max-w-[150px] text-[10px] text-slate-400">Click a service to hide it. Pick a floor to see one level.</div>
+            </div>
+          )}
           {bim && (
             <div className="absolute left-3 top-3 rounded-md border border-slate-300 bg-white/95 px-3 py-2 text-[11px] text-slate-700 shadow">
               <div className="mb-1 font-semibold tracking-wide">SERVICES</div>
-              <div><span className="mr-1 inline-block h-2 w-2 rounded-sm align-middle" style={{ background: "#2f6bff" }} /> Cold water</div>
-              <div><span className="mr-1 inline-block h-2 w-2 rounded-sm align-middle" style={{ background: "#e11d2e" }} /> Hot water</div>
-              <div><span className="mr-1 inline-block h-2 w-2 rounded-sm align-middle" style={{ background: "#3f3f46" }} /> Drainage</div>
-              <div><span className="mr-1 inline-block h-2 w-2 rounded-sm align-middle" style={{ background: "#f5c542" }} /> Electrical conduit</div>
+              <div><span className="mr-1 inline-block h-2 w-2 rounded-sm align-middle" style={{ background: SYSTEM_COLOR.cold }} /> Cold water</div>
+              <div><span className="mr-1 inline-block h-2 w-2 rounded-sm align-middle" style={{ background: SYSTEM_COLOR.hot }} /> Hot water</div>
+              <div><span className="mr-1 inline-block h-2 w-2 rounded-sm align-middle" style={{ background: SYSTEM_COLOR.drain }} /> Drainage</div>
+              <div><span className="mr-1 inline-block h-2 w-2 rounded-sm align-middle" style={{ background: SYSTEM_COLOR.conduit }} /> Electrical conduit</div>
             </div>
           )}
         </div>
@@ -1149,10 +1366,12 @@ export function BuildingViewer({ model }: { model: BuildingModel }) {
             <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: CONCRETE }} /> Columns / slab</li>
             <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: "#3f7a32" }} /> Trees / hedges</li>
             <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: "#2f3540" }} /> Balcony railings</li>
-            <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: "#2f6bff" }} /> Cold water — engineering view</li>
-            <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: "#e11d2e" }} /> Hot water</li>
-            <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: "#3f3f46" }} /> Drainage</li>
-            <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: "#f5c542" }} /> Electrical conduit</li>
+            <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: SYSTEM_COLOR.cold }} /> Cold water — MEP / engineering view</li>
+            <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: SYSTEM_COLOR.hot }} /> Hot water</li>
+            <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: SYSTEM_COLOR.drain }} /> Drainage</li>
+            <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: SYSTEM_COLOR.conduit }} /> Electrical conduit</li>
+            <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: SYSTEM_COLOR.supply }} /> AC supply duct / <span className="inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: SYSTEM_COLOR.return }} /> return air</li>
+            <li><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: SYSTEM_COLOR.sprinkler }} /> Fire sprinkler</li>
           </ul>
         </Card>
         <Card title="Model basis">

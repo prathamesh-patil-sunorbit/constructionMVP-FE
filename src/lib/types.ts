@@ -857,7 +857,15 @@ export interface PlinthItem {
   done: boolean;
   source: "plan" | "added";
   doneAt?: string;
+  /** Why this point could not be done as planned. Lives on the item, not in a separate list. */
+  reasonType?: string;
+  reason?: string;
+  hoursLost?: number;
+  reasonByName?: string;
+  reasonAt?: string;
 }
+
+export const HINDRANCE_TYPES = ["Rain / weather", "Rock / hard strata", "Water / dewatering", "Machine breakdown", "Labour shortage", "Material delay", "Permission / approval", "Design / drawing", "Other"];
 
 export interface PlinthDay {
   _id: string;
@@ -876,6 +884,9 @@ export interface PlinthDay {
   machines: { name: string; count: number; kind: "machine" | "vehicle" }[];
   items: PlinthItem[];
   actualQuantity?: number;
+  /** What was really on site; empty or missing means "as planned". */
+  actualCrew?: { trade: string; count: number }[];
+  actualMachines?: { name: string; count: number; kind: "machine" | "vehicle" }[];
   note?: string;
   status: "Pending" | "In Progress" | "Done";
   completedAt?: string;
