@@ -30,6 +30,7 @@ const auditTrail = item("/audit", "Audit Trail", "Who changed what");
 const admin = item("/admin", "Users & Rules", "Users, roles, thresholds");
 const schedule = item("/schedule", "MSP Schedule", "Upload .mpp / .xlsx, every task");
 const mppTasks = item("/mpp-tasks", "MSP Tasks", "Schedule tasks day by day");
+const model4d = item("/schedule-4d", "MSP 4D Model", "Building rises with the schedule");
 
 // Sidebar per role: each role only sees the screens it works with.
 export const NAV_BY_ROLE: Record<Role, NavSection[]> = {
@@ -59,7 +60,7 @@ export const NAV_BY_ROLE: Record<Role, NavSection[]> = {
     { title: "Estimation data", items: [teams] },
   ],
   admin: [
-    { title: "Overview", items: [dashboard, projects(), schedule, mppTasks] },
+    { title: "Overview", items: [dashboard, projects(), schedule, mppTasks, model4d] },
     { title: "Intelligence", items: [aiInsights, copilot, geotech, model3d, planCheck, reports] },
     { title: "Setup", items: [admin, teams] },
     { title: "Records", items: [risks, blockers(), plinthPlan, siteReports, auditTrail] },
