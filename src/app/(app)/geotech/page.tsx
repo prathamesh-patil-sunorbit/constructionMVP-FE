@@ -45,6 +45,11 @@ export default function GeotechPage() {
     setData((d) => (d ? { ...d, reports: [report, ...d.reports.filter((r) => r._id !== report._id && r._id !== replaces)] } : d));
     setSelectedId(report._id);
   };
+  const onDeleted = (id: string) => {
+    setData((d) => (d ? { ...d, reports: d.reports.filter((r) => r._id !== id) } : d));
+    if (selectedId === id) setSelectedId(null);
+    reload(); // learning may change when a report with actuals goes
+  };
   const onUpdated = (report: GeotechReport) => {
     setData((d) => (d ? { ...d, reports: d.reports.map((r) => (r._id === report._id ? report : r)) } : d));
     reload(); // the learning summary changes when actuals are recorded
@@ -68,7 +73,7 @@ export default function GeotechPage() {
 
       <div className="grid gap-5 lg:grid-cols-[1fr_20rem]">
         <EstimateForm projectId={project} configured={data?.ai.configured} onCreated={onCreated} />
-        <History reports={data?.reports || []} selectedId={selected?._id} onSelect={setSelectedId} />
+        <History reports={data?.reports || []} selectedId={selected?._id} onSelect={setSelectedId} onDeleted={onDeleted} />
       </div>
 
       {loading && !data ? <Loading /> : selected ? (
@@ -243,17 +248,43 @@ const STATE = (r: GeotechReport) => {
   }[r.verification.status];
 };
 
-function History({ reports, selectedId, onSelect }: { reports: GeotechReport[]; selectedId?: string; onSelect: (id: string) => void }) {
+const DELETE_ANY = ["admin", "project_manager", "site_manager"];
+
+function History({ reports, selectedId, onSelect, onDeleted }: {
+  reports: GeotechReport[]; selectedId?: string; onSelect: (id: string) => void; onDeleted: (id: string) => void;
+}) {
+  const { user } = useAuth();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const canDelete = (r: GeotechReport) => Boolean(user && (DELETE_ANY.includes(user.role) || r.uploadedBy?._id === user._id));
+  const remove = async (r: GeotechReport) => {
+    const name = r.source === "sample" ? "the sample soil profile" : `"${r.file?.originalName}"`;
+    const plan = r.verification.status === "Accepted"
+      ? "\n\nIt is accepted, so its Plinth Plan and every site update on it will be deleted too."
+      : "";
+    if (!window.confirm(`Delete ${name} and all its data?${plan}\n\nThis cannot be undone.`)) return;
+    setBusy(r._id);
+    setErr(null);
+    try {
+      await api(`/geotech/${r._id}`, { method: "DELETE" });
+      onDeleted(r._id);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not delete the report");
+    } finally {
+      setBusy(null);
+    }
+  };
   return (
     <Panel title="Reports" icon="file" actions={<span className="text-xs text-slate-400">{reports.length}</span>} className="flex flex-col">
+      <ErrorBox message={err} />
       {reports.length ? (
         <ul className="-mx-2 max-h-64 space-y-1 overflow-y-auto">
           {reports.map((r) => {
             const s = STATE(r);
             const active = r._id === selectedId;
             return (
-              <li key={r._id}>
-                <button onClick={() => onSelect(r._id)} className={cx("flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition", active ? "bg-slate-900 text-white" : "hover:bg-slate-50")}>
+              <li key={r._id} className="group relative">
+                <button onClick={() => onSelect(r._id)} className={cx("flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition", canDelete(r) && "pr-10", active ? "bg-slate-900 text-white" : "hover:bg-slate-50")}>
                   <span className={cx("grid h-9 w-9 shrink-0 place-items-center rounded-lg", active ? "bg-white/10" : r.source === "sample" ? "bg-amber-50 text-amber-600" : "bg-red-50 text-red-600")}>
                     <Icon name={r.source === "sample" ? "layers" : "file"} />
                   </span>
@@ -264,6 +295,20 @@ function History({ reports, selectedId, onSelect }: { reports: GeotechReport[]; 
                     </span>
                   </span>
                 </button>
+                {canDelete(r) && (
+                  <button
+                    onClick={() => remove(r)}
+                    disabled={busy === r._id}
+                    title="Delete this report and its data"
+                    aria-label="Delete report"
+                    className={cx(
+                      "absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-lg transition",
+                      active ? "text-slate-300 hover:bg-white/10 hover:text-white" : "text-slate-400 hover:bg-red-50 hover:text-red-600",
+                    )}
+                  >
+                    {busy === r._id ? <Spinner /> : <Icon name="trash" />}
+                  </button>
+                )}
               </li>
             );
           })}
