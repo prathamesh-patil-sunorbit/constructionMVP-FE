@@ -1026,3 +1026,54 @@ export interface ScheduleAdvice {
   model?: string;
   at: string;
 }
+
+// ---------- 4D model from the MSP schedule ----------
+export type Stage4D = "structure" | "masonry" | "services" | "finishes" | "painting";
+export interface Task4D {
+  uid: number; name: string; activity: string; trade: string; stage: Stage4D | null; wbs: string | null;
+  start: string; finish: string; baselineStart: string | null; baselineFinish: string | null;
+  actualStart: string | null; actualFinish: string | null;
+  percent: number; status: ScheduleTaskStatus; critical: boolean;
+  sharedWith?: string; // a slab cast together with another level
+}
+export interface Level4D {
+  key: string; name: string; kind: "basement" | "podium" | "floor" | "terrace" | "above";
+  structure: { start: string; finish: string } | null;
+  structureBaseline: { start: string; finish: string } | null;
+  structureFrom?: string;
+  tasks: Task4D[];
+}
+export interface Tower4D { uid: number; name: string; fullName: string; start: string; finish: string; baselineFinish: string | null; percent: number; levels: Level4D[]; general: Task4D[] }
+export interface Model4D {
+  title: string | null; statusDate: string | null; start: string; finish: string; baselineFinish: string | null;
+  stages: { key: Stage4D; label: string }[];
+  towers: Tower4D[];
+  other: { uid: number; name: string; start: string; finish: string; percent: number }[];
+}
+
+// Floor plan and facade traced from a project's drawings (backend src/data/buildings/*.json).
+export type Side = "N" | "S" | "E" | "W";
+export interface ProfileUnit {
+  no: string; type: string; carpetSqm: number; balconySqm: number; dryBalconySqm: number; totalSqft: number;
+  rect: [number, number, number, number]; balconies: { side: Side; from: number; to: number }[];
+  rooms?: { type: RoomType; rect: [number, number, number, number]; name?: string }[];
+}
+export type RoomType = "bed" | "living" | "dining" | "kitchen" | "toilet" | "balcony" | "dry" | "passage" | "lobby";
+export interface BuildingProfile {
+  match: string; name: string; source: string; pxToM: number;
+  plan: { x0: number; y0: number; x1: number; y1: number };
+  units: ProfileUnit[];
+  core: { name: string; rect: [number, number, number, number] }[];
+  wings: Record<string, { mirror: boolean; note?: string }>;
+  wingGapM: number;
+  typicalFloors: number[];
+  refugeFloors: number[];
+  refugeOmits: string[];
+  podium: { widthM: number; depthM: number };
+  floorHeightM: number;
+  podiumHeightM: number;
+  facade: { wall: string; band: string; copper: string; jali: string; crownJali?: string; glass: string; louver: string; balconyRail?: string };
+  drawings?: Record<string, { typical: PlanDrawing | null; refuge: PlanDrawing | null }>;
+}
+/** A floor plan sheet: image, its pixel size and where the plan outline sits on it. */
+export interface PlanDrawing { src: string; size: [number, number]; bbox: [number, number, number, number]; mirrored: boolean }
