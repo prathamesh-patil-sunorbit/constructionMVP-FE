@@ -41,13 +41,13 @@ export const NAV_BY_ROLE: Record<Role, NavSection[]> = {
   site_manager: [
     { title: "Monitor", items: [dashboard, today("Site Plan"), blockers(), risks] },
     { title: "Site", items: [projects("Project Activities"), schedule, geotech, plinthPlan, siteReports] },
-    { title: "Intelligence", items: [aiInsights, copilot, model3d] },
+    { title: "Intelligence", items: [aiInsights, copilot] },
   ],
   project_manager: [
     { title: "Monitor", items: [dashboard, risks, blockers()] },
-    { title: "Plan", items: [projects("Projects & Planning"), geotech, planCheck, model3d] },
+    { title: "Plan", items: [projects("Projects & Planning"), geotech, model3d] },
     { title: "Intelligence", items: [aiInsights, copilot, reports] },
-    { title: "Records", items: [siteReports, teams, auditTrail] },
+    { title: "Records", items: [siteReports] },
   ],
   planning_engineer: [
     { title: "Overview", items: [dashboard, projects("Schedule & Projects")] },
@@ -61,9 +61,9 @@ export const NAV_BY_ROLE: Record<Role, NavSection[]> = {
   ],
   admin: [
     { title: "Overview", items: [dashboard, projects(), schedule, mppTasks, model4d] },
-    { title: "Intelligence", items: [aiInsights, copilot, geotech, model3d, planCheck, reports] },
+    { title: "Intelligence", items: [aiInsights, copilot, model3d, reports] },
     { title: "Setup", items: [admin, teams] },
-    { title: "Records", items: [risks, blockers(), plinthPlan, siteReports, auditTrail] },
+    { title: "Records", items: [risks, blockers(), auditTrail] },
   ],
 };
 
