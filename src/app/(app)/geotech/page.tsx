@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { API_URL, api, useApi } from "@/lib/api";
 import type { GeotechEstimate, GeotechList, GeotechReport, GeotechWeather, Project, SoilClass, WeatherKind } from "@/lib/types";
 import { Badge, Button, ErrorBox, Input, Loading, Select } from "@/components/ui";
 import { AiMark, CalculatedMark } from "@/components/ai";
-import { DailyWorkPlan, Dropzone, EquipmentCards, Icon, PhaseCards, PhaseTimeline, SoilProfile, Spinner, type IconName } from "@/components/geotech";
+import { DailyWorkPlan, Dropzone, EquipmentCards, Icon, PhaseCards, PhaseTimeline, SoilProfile, Spinner, equipmentPhoto, type IconName } from "@/components/geotech";
 import { fmtDate, fmtDateTime, fmtWeekday, todayInput } from "@/lib/format";
 import { useAuth } from "@/lib/auth";
 import { canAccess } from "@/lib/navigation";
@@ -39,11 +39,16 @@ export default function GeotechPage() {
   const project = projectId || projects?.[0]?._id || "";
   const { data, error, loading, reload, setData } = useApi<GeotechList>(project ? `/geotech?project=${project}` : null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const selected = data?.reports.find((r) => r._id === selectedId) || data?.reports[0] || null;
+  const [showForm, setShowForm] = useState(false);
+  const reports = data?.reports ?? [];
+  const selected = reports.find((r) => r._id === selectedId) || reports[0] || null;
+  // The upload form stays open while there is nothing to look at.
+  const formOpen = showForm || (!!data && !reports.length);
 
   const onCreated = (report: GeotechReport, replaces?: string) => {
     setData((d) => (d ? { ...d, reports: [report, ...d.reports.filter((r) => r._id !== report._id && r._id !== replaces)] } : d));
     setSelectedId(report._id);
+    setShowForm(false);
   };
   const onDeleted = (id: string) => {
     setData((d) => (d ? { ...d, reports: d.reports.filter((r) => r._id !== id) } : d));
@@ -62,7 +67,7 @@ export default function GeotechPage() {
       <AgentHeader
         configured={data?.ai.configured}
         quotaUntil={data?.ai.quota?.blocked ? data.ai.quota.retryAt : undefined}
-        jobs={data?.learning.observations ?? 0}
+        report={selected}
         projectPicker={projects.length > 1 ? (
           <Select value={project} onChange={(e) => { setProjectId(e.target.value); setSelectedId(null); }} className="max-w-56 border-white/20 bg-white/10 text-white">
             {projects.map((p) => <option key={p._id} value={p._id} className="text-slate-900">{p.name}</option>)}
@@ -71,10 +76,16 @@ export default function GeotechPage() {
       />
       <ErrorBox message={error} />
 
-      <div className="grid gap-5 lg:grid-cols-[1fr_20rem]">
-        <EstimateForm projectId={project} configured={data?.ai.configured} onCreated={onCreated} />
-        <History reports={data?.reports || []} selectedId={selected?._id} onSelect={setSelectedId} onDeleted={onDeleted} />
-      </div>
+      <ReportBar
+        reports={reports}
+        selectedId={selected?._id}
+        onSelect={(id) => { setSelectedId(id); setShowForm(false); }}
+        onDeleted={onDeleted}
+        formOpen={formOpen}
+        canClose={reports.length > 0}
+        onToggleForm={() => setShowForm(!showForm)}
+      />
+      {formOpen && <EstimateForm projectId={project} configured={data?.ai.configured} onCreated={onCreated} />}
 
       {loading && !data ? <Loading /> : selected ? (
         <ReportView key={selected._id} report={selected} learning={data!.learning} onUpdated={onUpdated} onCreated={onCreated} />
@@ -82,7 +93,7 @@ export default function GeotechPage() {
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
           <span className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-xl bg-slate-100 text-slate-500"><Icon name="layers" className="h-6 w-6" /></span>
           <p className="font-medium text-slate-800">No geotechnical report yet</p>
-          <p className="mt-1 text-sm text-slate-500">Upload one above, or load the sample soil profile to see how the estimate works.</p>
+          <p className="mt-1 text-sm text-slate-500">Upload the soil investigation report above, or load the sample soil profile to see how the estimate works.</p>
         </div>
       )}
     </div>
@@ -91,44 +102,74 @@ export default function GeotechPage() {
 
 // ---------------------------------------------------------------------------
 
-function AgentHeader({ configured, quotaUntil, jobs, projectPicker }: { configured?: boolean; quotaUntil?: string; jobs: number; projectPicker: React.ReactNode }) {
-  const steps: { icon: IconName; title: string; text: string }[] = [
-    { icon: "sparkles", title: "AI reads the report", text: "Soil layers, water table, rock, SBC" },
-    { icon: "calc", title: "Rules calculate", text: "JCBs, days and crew per phase" },
-    { icon: "brain", title: "Learns from site", text: `${jobs} recorded job${jobs === 1 ? "" : "s"} so far` },
-    { icon: "check", title: "You approve", text: "Accept or reject, fully audited" },
+type StepState = "done" | "current" | "todo" | "stopped";
+
+const STEP_DOT: Record<StepState, string> = {
+  done: "bg-emerald-400 text-slate-900",
+  current: "bg-amber-400 text-slate-900 ring-4 ring-amber-400/25",
+  stopped: "bg-red-400 text-slate-900",
+  todo: "bg-white/10 text-slate-300",
+};
+
+// Where the selected report stands in the flow: read → calculated → approved → on site.
+function AgentHeader({ configured, quotaUntil, report, projectPicker }: { configured?: boolean; quotaUntil?: string; report: GeotechReport | null; projectPicker: React.ReactNode }) {
+  const e = report?.estimate;
+  const f = report?.extraction.facts;
+  const v = report?.verification.status;
+  const steps: { icon: IconName; title: string; text: string; state: StepState }[] = [
+    {
+      icon: "sparkles", title: "AI reads the report",
+      text: !report ? "Soil layers, water table, rock, SBC" : f ? `${f.completeness.found} of ${f.completeness.of} key facts found` : "The file could not be read",
+      state: !report ? "todo" : f ? "done" : "stopped",
+    },
+    {
+      icon: "calc", title: "Rules calculate",
+      text: e && report ? `${plinthDays(e, report.weather)} days · ${e.totals.peakJcbs} JCBs · ${e.totals.peakWorkers} workers` : "JCBs, days and crew per phase",
+      state: e ? "done" : "todo",
+    },
+    {
+      icon: "check", title: "Manager approves",
+      text: v === "Accepted" || v === "Overridden" ? `Accepted by ${report?.verification.by?.name ?? "a manager"}` : v === "Rejected" ? "Rejected, nothing sent to site" : e ? "Waiting for a decision" : "Accept or reject, fully audited",
+      state: v === "Accepted" || v === "Overridden" ? "done" : v === "Rejected" ? "stopped" : e ? "current" : "todo",
+    },
+    {
+      icon: "clipboard", title: "Checklist on site",
+      text: v === "Accepted" ? "Site team ticks it off day by day" : "Sent when the estimate is accepted",
+      state: v === "Accepted" ? "done" : "todo",
+    },
   ];
+  const ok = configured && !quotaUntil;
   return (
-    <div className="overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 text-white shadow-sm">
+    <div className="overflow-hidden rounded-2xl bg-[radial-gradient(120%_140%_at_0%_0%,#1e293b_0%,#0b1120_55%,#060a14_100%)] text-white shadow-[0_18px_40px_-24px_rgba(2,6,23,.8)]">
       <div className="flex flex-wrap items-start justify-between gap-4 px-6 pt-6">
-        <div>
+        <div className="min-w-0">
           <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-amber-400/15 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-amber-300 ring-1 ring-inset ring-amber-400/30">
             <Icon name="sparkles" className="h-3.5 w-3.5" /> Geotech Agent
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight">Plinth Estimate</h1>
-          <p className="mt-1 max-w-xl text-sm text-slate-300">Upload a soil investigation report. The agent works out the excavation, footings and backfill up to plinth level, with the machines, crew and days each phase needs.</p>
+          <h1 className="text-2xl font-semibold tracking-tight sm:text-[28px]">Plinth Estimate</h1>
+          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-300">
+            From the soil investigation report to a day-by-day site plan: what the ground is like, how deep to dig, and the machines, crew and days needed up to plinth level.
+          </p>
         </div>
         <div className="flex flex-col items-end gap-2">
           {projectPicker}
-          {(() => {
-            const ok = configured && !quotaUntil;
-            return (
-              <span className={cx("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset", ok ? "bg-emerald-400/10 text-emerald-300 ring-emerald-400/30" : "bg-amber-400/10 text-amber-300 ring-amber-400/30")}>
-                <span className={cx("h-1.5 w-1.5 rounded-full", ok ? "bg-emerald-400" : "bg-amber-400")} />
-                {configured === undefined ? "Checking AI…" : quotaUntil ? `AI quota used up · resets ${fmtDateTime(quotaUntil)}` : configured ? "AI connected" : "AI offline: sample profile only"}
-              </span>
-            );
-          })()}
+          <span className={cx("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset", ok ? "bg-emerald-400/10 text-emerald-300 ring-emerald-400/30" : "bg-amber-400/10 text-amber-300 ring-amber-400/30")}>
+            <span className={cx("h-1.5 w-1.5 rounded-full", ok ? "bg-emerald-400" : "bg-amber-400")} />
+            {configured === undefined ? "Checking AI…" : quotaUntil ? `AI quota used up · resets ${fmtDateTime(quotaUntil)}` : configured ? "AI connected" : "AI offline: sample profile only"}
+          </span>
         </div>
       </div>
-      <ol className="mt-6 grid gap-px border-t border-white/10 bg-white/10 sm:grid-cols-2 lg:grid-cols-4">
-        {steps.map((s, i) => (
-          <li key={s.title} className="flex items-center gap-3 bg-slate-900/60 px-6 py-4">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/10 text-amber-300"><Icon name={s.icon} className="h-[18px] w-[18px]" /></span>
+      <ol className="mt-6 grid border-t border-white/10 sm:grid-cols-2 lg:grid-cols-4">
+        {steps.map((st, i) => (
+          <li key={st.title} className={cx("relative flex items-center gap-3 px-6 py-4", i > 0 && "border-white/10 sm:border-l", st.state === "current" && "bg-white/[0.04]")}>
+            <span className={cx("grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-semibold", STEP_DOT[st.state])}>
+              {st.state === "done" ? <Icon name="check" className="h-[18px] w-[18px]" /> : st.state === "stopped" ? <Icon name="x" className="h-[18px] w-[18px]" /> : i + 1}
+            </span>
             <div className="min-w-0">
-              <div className="text-sm font-medium"><span className="mr-1 text-slate-400">{i + 1}.</span>{s.title}</div>
-              <div className="truncate text-xs text-slate-400">{s.text}</div>
+              <div className={cx("text-sm font-medium", st.state === "todo" ? "text-slate-300" : "text-white")}>{st.title}</div>
+              <div className={cx("truncate text-xs", st.state === "current" ? "text-amber-200" : "text-slate-400")}>{st.text}</div>
             </div>
+            {st.state === "current" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-amber-400" />}
           </li>
         ))}
       </ol>
@@ -190,7 +231,7 @@ function EstimateForm({ projectId, configured, onCreated }: { projectId: string;
   };
 
   return (
-    <Panel title="New estimate" icon="upload">
+    <Panel title="New estimate" icon="upload" actions={<span className="text-xs text-slate-500">Soil report required · weather report optional</span>}>
       <form className="grid gap-5 md:grid-cols-[1.2fr_1fr]" onSubmit={(e) => { e.preventDefault(); run("upload"); }}>
         <Dropzone file={file} onFile={setFile} disabled={!!busy} />
         <div className="flex flex-col gap-3">
@@ -250,8 +291,9 @@ const STATE = (r: GeotechReport) => {
 
 const DELETE_ANY = ["admin", "project_manager", "site_manager"];
 
-function History({ reports, selectedId, onSelect, onDeleted }: {
+function ReportBar({ reports, selectedId, onSelect, onDeleted, formOpen, canClose, onToggleForm }: {
   reports: GeotechReport[]; selectedId?: string; onSelect: (id: string) => void; onDeleted: (id: string) => void;
+  formOpen: boolean; canClose: boolean; onToggleForm: () => void;
 }) {
   const { user } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
@@ -275,23 +317,35 @@ function History({ reports, selectedId, onSelect, onDeleted }: {
     }
   };
   return (
-    <Panel title="Reports" icon="file" actions={<span className="text-xs text-slate-400">{reports.length}</span>} className="flex flex-col">
-      <ErrorBox message={err} />
-      {reports.length ? (
-        <ul className="-mx-2 max-h-64 space-y-1 overflow-y-auto">
+    <section className="rounded-2xl border border-slate-200/80 bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,.04),0_12px_28px_-16px_rgba(15,23,42,.18)]">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2 pl-1 text-sm font-semibold text-slate-900">
+          <span className="grid h-8 w-8 place-items-center rounded-xl bg-gradient-to-br from-amber-100 to-amber-50 text-amber-700 ring-1 ring-amber-200/80"><Icon name="file" /></span>
+          Soil reports
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{reports.length}</span>
+        </div>
+        <ul className="order-last flex w-full min-w-0 gap-2 overflow-x-auto pb-0.5 sm:order-none sm:w-auto sm:flex-1">
           {reports.map((r) => {
-            const s = STATE(r);
+            const st = STATE(r);
             const active = r._id === selectedId;
             return (
-              <li key={r._id} className="group relative">
-                <button onClick={() => onSelect(r._id)} className={cx("flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition", canDelete(r) && "pr-10", active ? "bg-slate-900 text-white" : "hover:bg-slate-50")}>
+              <li key={r._id} className="relative w-72 shrink-0">
+                <button
+                  onClick={() => onSelect(r._id)}
+                  aria-current={active}
+                  className={cx(
+                    "flex w-full items-center gap-3 rounded-xl border px-2.5 py-2 text-left transition",
+                    canDelete(r) && "pr-10",
+                    active ? "border-slate-900 bg-slate-900 text-white shadow-md" : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50",
+                  )}
+                >
                   <span className={cx("grid h-9 w-9 shrink-0 place-items-center rounded-lg", active ? "bg-white/10" : r.source === "sample" ? "bg-amber-50 text-amber-600" : "bg-red-50 text-red-600")}>
                     <Icon name={r.source === "sample" ? "layers" : "file"} />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">{r.source === "sample" ? "Sample soil profile" : r.file?.originalName}</span>
-                    <span className={cx("flex items-center gap-1.5 text-[11px]", active ? "text-slate-300" : "text-slate-500")}>
-                      <span className={cx("h-1.5 w-1.5 rounded-full", s.dot)} />{s.label}{r.inputs.plinthAreaSqm != null && ` · ${r.inputs.plinthAreaSqm} m²${r.inputs.areaSource === "default" ? " (assumed)" : ""}`} · {fmtDateTime(r.createdAt)}
+                    <span className={cx("flex items-center gap-1.5 truncate text-[11px]", active ? "text-slate-300" : "text-slate-500")}>
+                      <span className={cx("h-1.5 w-1.5 shrink-0 rounded-full", st.dot)} />{st.label} · {fmtDateTime(r.createdAt)}
                     </span>
                   </span>
                 </button>
@@ -312,94 +366,160 @@ function History({ reports, selectedId, onSelect, onDeleted }: {
               </li>
             );
           })}
+          {!reports.length && <li className="px-1 py-2 text-sm text-slate-500">No reports yet. Upload the first one below.</li>}
         </ul>
-      ) : <p className="text-sm text-slate-500">No reports yet.</p>}
-    </Panel>
+        {(canClose || !formOpen) && (
+          <Button variant={formOpen ? "secondary" : "primary"} className="ml-auto shrink-0 py-2" onClick={onToggleForm}>
+            {formOpen ? <><Icon name="x" /> Close</> : <><Icon name="plus" /> New estimate</>}
+          </Button>
+        )}
+      </div>
+      {err && <div className="mt-2"><ErrorBox message={err} /></div>}
+    </section>
   );
 }
 
 // ---------------------------------------------------------------------------
+
+type TabKey = "overview" | "soil" | "schedule" | "resources" | "learning";
 
 function ReportView({ report, learning, onUpdated, onCreated }: {
   report: GeotechReport; learning: GeotechList["learning"]; onUpdated: (r: GeotechReport) => void; onCreated: (r: GeotechReport, replaces?: string) => void;
 }) {
   const { extraction, estimate: e, narration } = report;
   const facts = extraction.facts;
+  const [tab, setTab] = useState<TabKey>("overview");
+  const tabsRef = useRef<HTMLDivElement>(null);
+  // Switching tabs from far down the page brings the tab bar back into view.
+  const openTab = (key: TabKey) => {
+    setTab(key);
+    const el = tabsRef.current;
+    if (el && el.getBoundingClientRect().top < 0) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   if (!e || !facts) return <NotRead report={report} onCreated={onCreated} />;
+
+  const machineCount = e.totals.machines.length + (e.totals.tippers > 0 ? 1 : 0) + e.totals.otherVehicles.length;
+  const tabs: { key: TabKey; label: string; icon: IconName; hint?: string }[] = [
+    { key: "overview", label: "Overview", icon: "info", hint: e.warnings.length ? `${e.warnings.length} to check` : undefined },
+    { key: "soil", label: "Soil report", icon: "layers", hint: `${facts.layers.length} layers` },
+    { key: "schedule", label: "Schedule & weather", icon: "calendar", hint: `${plinthDays(e, report.weather)} days` },
+    { key: "resources", label: "Machines & crew", icon: "digger", hint: `${machineCount} types` },
+    { key: "learning", label: "Learning", icon: "brain" },
+  ];
 
   return (
     <div className="space-y-5">
       <ReportTitle report={report} />
-      <SiteSummary report={report} onCreated={onCreated} />
-      <Kpis estimate={e} weather={report.weather} />
       <Verification report={report} onUpdated={onUpdated} />
-      {e.warnings.length > 0 && <Warnings warnings={e.warnings} />}
-      <WeatherPanel report={report} onUpdated={onUpdated} />
 
-      <div className="grid gap-5 xl:grid-cols-[1.1fr_1fr]">
-        <Panel title="Soil layer view" icon="layers" actions={<span className="text-[11px] text-slate-400">hover a layer for the report text</span>}>
-          <SoilProfile facts={facts} depthM={e.inputs.depthM} foundation={e.foundation.type} />
-        </Panel>
-        <SoilFacts report={report} />
+      <div ref={tabsRef} className="sticky top-0 z-20 -mx-4 bg-[#f6f7f9]/85 px-4 py-2 backdrop-blur md:-mx-6 md:px-6">
+        <div role="tablist" aria-label="Estimate sections" className="flex gap-1 overflow-x-auto rounded-2xl border border-slate-200/80 bg-white p-1 shadow-sm">
+          {tabs.map((t) => {
+            const active = t.key === tab;
+            return (
+              <button
+                key={t.key}
+                role="tab"
+                aria-selected={active}
+                onClick={() => openTab(t.key)}
+                className={cx(
+                  "flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition",
+                  active ? "bg-slate-900 text-white shadow" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+                )}
+              >
+                <Icon name={t.icon} />
+                {t.label}
+                {t.hint && <span className={cx("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", active ? "bg-white/15 text-slate-200" : "bg-slate-100 text-slate-500")}>{t.hint}</span>}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      <KeyFindings report={report} />
-
-      <Panel title="AI explanation" icon="sparkles" actions={narration?.aiGenerated ? <AiMark /> : undefined} className={narration ? "border-violet-200" : undefined}>
-        {narration ? (
-          <div className="space-y-5">
-            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-violet-50 via-white to-amber-50/60 p-5 ring-1 ring-violet-100">
-              <span className="absolute inset-y-4 left-0 w-1 rounded-r bg-violet-400" />
-              <p className="relative pl-2 text-[15px] leading-relaxed text-slate-800">{narration.summary}</p>
-            </div>
-            {!!narration.recommendations?.length && (
-              <div>
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">What to do</div>
-                <ol className="grid gap-3 md:grid-cols-3">
-                  {narration.recommendations.map((r, i) => (
-                    <li key={i} className="relative overflow-hidden rounded-2xl border border-violet-100 bg-white p-4 shadow-sm">
-                      <span className="pointer-events-none absolute -bottom-3 right-3 text-7xl font-black leading-none text-violet-50">{i + 1}</span>
-                      <span className="relative block text-sm font-semibold leading-snug text-slate-900">{r.action}</span>
-                      <span className="relative mt-2 block text-xs leading-relaxed text-slate-500">{r.rationale}</span>
-                    </li>
-                  ))}
-                </ol>
+      {/* Every tab stays mounted, so forms and open sections keep their state when you switch. */}
+      <div role="tabpanel" hidden={tab !== "overview"} className="space-y-5">
+        <SiteSummary report={report} onCreated={onCreated} />
+        <Kpis estimate={e} weather={report.weather} onMachines={() => openTab("resources")} />
+        {e.warnings.length > 0 && (
+          <Panel title="Check before you approve" icon="alert" actions={<span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">{e.warnings.length}</span>}>
+            <Warnings warnings={e.warnings} />
+          </Panel>
+        )}
+        <Panel title="What it means" icon="sparkles" actions={narration?.aiGenerated ? <AiMark /> : undefined} className={narration ? "border-violet-200" : undefined}>
+          {narration ? (
+            <div className="space-y-5">
+              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-violet-50 via-white to-amber-50/60 p-5 ring-1 ring-violet-100">
+                <span className="absolute inset-y-4 left-0 w-1 rounded-r bg-violet-400" />
+                <p className="relative pl-2 text-[15px] leading-relaxed text-slate-800">{narration.summary}</p>
               </div>
-            )}
-          </div>
-        ) : (
-          <p className="text-sm text-slate-500">No AI explanation for this run (AI unavailable). Every figure on this page is calculated by the rules and is complete without it.</p>
-        )}
-      </Panel>
+              {!!narration.recommendations?.length && (
+                <div>
+                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">What to do</div>
+                  <ol className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {narration.recommendations.map((rec, i) => (
+                      <li key={i} className="relative overflow-hidden rounded-2xl border border-violet-100 bg-white p-4 shadow-sm">
+                        <span className="pointer-events-none absolute -bottom-3 right-3 text-7xl font-black leading-none text-violet-50">{i + 1}</span>
+                        <span className="relative block text-sm font-semibold leading-snug text-slate-900">{rec.action}</span>
+                        <span className="relative mt-2 block text-xs leading-relaxed text-slate-500">{rec.rationale}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">No AI explanation for this run (AI unavailable). Every figure on this page is calculated by the rules and is complete without it.</p>
+          )}
+        </Panel>
+        <Panel title="Phase timeline" icon="calendar" actions={<CalculatedMark title="Five sequential phases; calendar days are the sum" />}>
+          <PhaseTimeline estimate={withWeather(e, report.weather)} />
+        </Panel>
+      </div>
 
-      <Panel title="Phase timeline" icon="calendar" actions={<CalculatedMark title="Five sequential phases; calendar days are the sum" />}>
-        <PhaseTimeline estimate={withWeather(e, report.weather)} />
-      </Panel>
+      <div role="tabpanel" hidden={tab !== "soil"} className="space-y-5">
+        <div className="grid gap-5 xl:grid-cols-[1.1fr_1fr]">
+          <Panel title="Soil layer view" icon="layers" actions={<span className="text-[11px] text-slate-400">hover a layer for the report text</span>}>
+            <SoilProfile facts={facts} depthM={e.inputs.depthM} foundation={e.foundation.type} />
+          </Panel>
+          <SoilFacts report={report} />
+        </div>
+        <KeyFindings report={report} />
+      </div>
 
-      <Panel
-        title="Daily work plan"
-        icon="users"
-        actions={<CalculatedMark title="Each phase's total split evenly across its days — a sequencing guide, not a measured record" />}
-      >
-        <p className="mb-4 rounded-xl bg-slate-50 px-4 py-2.5 text-xs leading-relaxed text-slate-500">
-          Day by day: what the crew does, how many workers of each trade, and which machines are needed. Quantities are each
-          phase&apos;s total spread evenly across its days — actual daily output on site will vary. Tap a phase to open or close it.
-        </p>
-        <DailyWorkPlan phases={e.phases} />
-      </Panel>
+      <div role="tabpanel" hidden={tab !== "schedule"} className="space-y-5">
+        <WeatherPanel report={report} onUpdated={onUpdated} />
+        <Panel
+          title="Daily work plan"
+          icon="users"
+          actions={<CalculatedMark title="Each phase's total split evenly across its days — a sequencing guide, not a measured record" />}
+        >
+          <p className="mb-4 rounded-xl bg-slate-50 px-4 py-2.5 text-xs leading-relaxed text-slate-500">
+            Day by day: what the crew does, how many workers of each trade, and which machines are needed. Quantities are each
+            phase&apos;s total spread evenly across its days — actual daily output on site will vary. Tap a phase to open or close it.
+          </p>
+          <DailyWorkPlan phases={e.phases} />
+        </Panel>
+      </div>
 
-      <Panel title="Phase breakdown" icon="digger" actions={<span className="flex items-center gap-2"><Badge tone="slate">Confidence {e.confidence}%</Badge><CalculatedMark /></span>}>
-        <PhaseCards phases={e.phases} />
-        {(e.assumptions.length > 0 || e.confidenceBasis.length > 0) && (
-          <div className="mt-4 grid gap-3 text-xs text-slate-600 md:grid-cols-2">
-            {e.assumptions.length > 0 && <Note title="Assumptions" lines={e.assumptions} />}
-            <Note title={`Why ${e.confidence}% confidence`} lines={e.confidenceBasis} />
-          </div>
-        )}
-      </Panel>
+      <div role="tabpanel" hidden={tab !== "resources"} className="space-y-5">
+        <Panel title="Machines & vehicles" icon="wrench" actions={<span className="text-xs text-slate-500">what each one does, and when it is on site</span>}>
+          <EquipmentCards estimate={e} hideTitle />
+        </Panel>
+        <Panel title="Crew and machines per phase" icon="digger" actions={<span className="flex items-center gap-2"><Badge tone="slate">Confidence {e.confidence}%</Badge><CalculatedMark /></span>}>
+          <PhaseCards phases={e.phases} />
+          {(e.assumptions.length > 0 || e.confidenceBasis.length > 0) && (
+            <div className="mt-4 grid gap-3 text-xs text-slate-600 md:grid-cols-2">
+              {e.assumptions.length > 0 && <Note title="Assumptions" lines={e.assumptions} />}
+              <Note title={`Why ${e.confidence}% confidence`} lines={e.confidenceBasis} />
+            </div>
+          )}
+        </Panel>
+      </div>
 
-      <LearningPanel report={report} learning={learning} onUpdated={onUpdated} />
+      <div role="tabpanel" hidden={tab !== "learning"} className="space-y-5">
+        <LearningPanel report={report} learning={learning} onUpdated={onUpdated} />
+      </div>
     </div>
   );
 }
@@ -413,12 +533,26 @@ function Note({ title, lines }: { title: string; lines: string[] }) {
   );
 }
 
+const STATUS_PILL: Record<string, string> = {
+  Proposed: "bg-amber-50 text-amber-800 ring-amber-200",
+  Accepted: "bg-emerald-50 text-emerald-800 ring-emerald-200",
+  Rejected: "bg-slate-100 text-slate-600 ring-slate-200",
+  Overridden: "bg-sky-50 text-sky-800 ring-sky-200",
+  "Not read": "bg-red-50 text-red-700 ring-red-200",
+};
+
 function ReportTitle({ report }: { report: GeotechReport }) {
   const facts = report.extraction.facts;
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="min-w-0">
-        <h2 className="truncate text-lg font-semibold text-slate-900">{facts?.reportTitle || report.file?.originalName || "Soil report"}</h2>
+        <div className="mb-1 flex items-center gap-2">
+          <span className={cx("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset", STATUS_PILL[STATE(report).label] ?? "bg-slate-100 text-slate-600 ring-slate-200")}>
+            <span className={cx("h-1.5 w-1.5 rounded-full", STATE(report).dot)} />{STATE(report).label}
+          </span>
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Selected report</span>
+        </div>
+        <h2 className="line-clamp-2 text-lg font-semibold leading-snug text-slate-900" title={facts?.reportTitle || undefined}>{facts?.reportTitle || report.file?.originalName || "Soil report"}</h2>
         <p className="text-xs text-slate-500">
           {report.source === "sample" ? "Built-in sample profile" : report.file?.originalName} · {fmtDateTime(report.createdAt)}{report.uploadedBy ? ` · ${report.uploadedBy.name}` : ""}
         </p>
@@ -466,7 +600,7 @@ function withWeather(e: GeotechEstimate, w?: GeotechWeather | null): GeotechEsti
   return { ...e, phases, totals: { ...e.totals, calendarDays: day } };
 }
 
-function Kpis({ estimate: e, weather: w }: { estimate: GeotechEstimate; weather?: GeotechWeather | null }) {
+function Kpis({ estimate: e, weather: w, onMachines }: { estimate: GeotechEstimate; weather?: GeotechWeather | null; onMachines: () => void }) {
   const t = e.totals;
   const busiest = e.phases.find((p) => p.workerTotal === t.peakWorkers)?.name;
   const phases = `${e.phases.filter((p) => !p.insufficientData).length} phases in sequence`;
@@ -478,7 +612,21 @@ function Kpis({ estimate: e, weather: w }: { estimate: GeotechEstimate; weather?
         <Kpi icon="users" label="Peak workers" value={t.peakWorkers} sub={busiest ? `during ${busiest.toLowerCase()}` : undefined} />
         <Kpi icon="truck" photo="/equipment/tipper.jpg" label="Tippers" value={t.tippers} sub={`${e.excavation.looseVolumeM3} m³ to haul`} />
       </div>
-      <EquipmentCards estimate={e} />
+      <button
+        type="button"
+        onClick={onMachines}
+        className="group flex w-full flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-left shadow-sm transition hover:border-slate-300 hover:shadow-md"
+      >
+        <span className="mr-1 flex items-center gap-1.5 text-xs font-medium text-slate-500"><Icon name="wrench" className="h-3.5 w-3.5" />On site</span>
+        {[...t.machines.map((m) => ({ ...m, kind: "machine" as const })), ...(t.tippers > 0 ? [{ name: "Tipper", count: t.tippers, kind: "vehicle" as const }] : []), ...t.otherVehicles.map((v) => ({ ...v, kind: "vehicle" as const }))].map((m) => (
+          <span key={m.name} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 py-0.5 pl-0.5 pr-2.5 text-xs text-slate-700">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={equipmentPhoto(m.name, m.kind)} alt="" className="h-6 w-6 rounded-full object-cover" loading="lazy" />
+            <span className="font-semibold tabular-nums">{m.count}</span> {m.name}
+          </span>
+        ))}
+        <span className="ml-auto flex items-center gap-1 text-xs font-medium text-slate-600 group-hover:text-slate-900">Machines &amp; crew <Icon name="right" className="h-3.5 w-3.5" /></span>
+      </button>
     </div>
   );
 }
@@ -937,9 +1085,12 @@ function Verification({ report, onUpdated }: { report: GeotechReport; onUpdated:
   };
 
   return (
-    <div className={cx("rounded-2xl border px-4 py-3", s.box)}>
+    <div className={cx("rounded-2xl border px-5 py-4 shadow-sm", s.box)}>
       <div className="flex flex-wrap items-center gap-3">
-        <span className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Icon name={s.icon} /> {s.title}</span>
+        <span className="flex items-center gap-2 text-[15px] font-semibold text-slate-900">
+          <span className="grid h-8 w-8 place-items-center rounded-full bg-white/80 ring-1 ring-black/5"><Icon name={s.icon} /></span>
+          {v.status === "Pending" ? "Your decision: approve this estimate?" : s.title}
+        </span>
         <span className="text-xs text-slate-600">
           {v.status === "Pending" ? "This estimate is a proposal until a manager or engineer approves it." : `by ${v.by?.name ?? "—"} · ${fmtDateTime(v.at)}${v.note ? ` — “${v.note}”` : ""}`}
         </span>

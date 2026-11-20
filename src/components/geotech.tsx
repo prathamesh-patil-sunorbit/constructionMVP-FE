@@ -521,7 +521,7 @@ const EQUIPMENT_USE: Record<string, string> = {
   "Transit mixer": "Brings ready-mix concrete from the plant to the pour.",
 };
 
-export function EquipmentCards({ estimate }: { estimate: GeotechEstimate }) {
+export function EquipmentCards({ estimate, hideTitle }: { estimate: GeotechEstimate; hideTitle?: boolean }) {
   const t = estimate.totals;
   const items = [
     ...t.machines.map((m) => ({ ...m, kind: "machine" as const })),
@@ -539,7 +539,7 @@ export function EquipmentCards({ estimate }: { estimate: GeotechEstimate }) {
   };
   return (
     <div>
-      <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-500"><Icon name="wrench" className="h-3.5 w-3.5" />Machines &amp; vehicles needed</div>
+      {!hideTitle && <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-500"><Icon name="wrench" className="h-3.5 w-3.5" />Machines &amp; vehicles needed</div>}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {items.map((m) => {
           const photo = equipmentPhoto(m.name, m.kind);
