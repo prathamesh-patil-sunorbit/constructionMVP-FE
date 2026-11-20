@@ -30,11 +30,53 @@ export function PercentBar({ percent, expected, className }: { percent: number; 
 export const fmtD = (d?: string | null) => (d ? fmtDate(d, true) : "—");
 export const fmtDays = (n?: number | null) => (n == null ? "—" : `${n} ${n === 1 ? "day" : "days"}`);
 
-export function Variance({ days }: { days: number | null | undefined }) {
+// Finish date against the original (baseline) plan. "Overdue" is a different thing: past the due date.
+export function Variance({ days, short }: { days: number | null | undefined; short?: boolean }) {
   if (days == null) return <span className="text-slate-400">—</span>;
-  if (days === 0) return <span className="text-slate-500">on time</span>;
-  return <span className={cx("font-medium tabular-nums", days > 0 ? "text-red-600" : "text-emerald-600")}>{days > 0 ? `+${days}d late` : `${-days}d early`}</span>;
+  if (days === 0) return <span className="text-slate-500">{short ? "0d" : "on baseline"}</span>;
+  const text = short ? (days > 0 ? `+${days}d` : `−${-days}d`) : days > 0 ? `${days}d behind baseline` : `${-days}d ahead of baseline`;
+  return <span className={cx("font-medium tabular-nums", days > 0 ? "text-red-600" : "text-emerald-600")} title={days > 0 ? `Finishes ${days} days later than the baseline plan` : `Finishes ${-days} days earlier than the baseline plan`}>{text}</span>;
 }
+
+// ---------- Plain names: the schedule is written in capitals with long wing names. ----------
+
+const KEEP = new Set(["RCC", "PCC", "UGWT", "STP", "NOC", "NOC'S", "CP", "VDP", "MEP", "LW", "R/F", "ST.", "DG", "A", "B"]);
+export function niceName(s: string) {
+  let first = true; // capitalise the first word with letters ("04 Slab (podium 3 floor slab)")
+  return s
+    .replace(/\s+/g, " ")
+    .replace(/-\s+/g, "-")
+    .trim()
+    .split(" ")
+    .map((w) => {
+      if (KEEP.has(w.toUpperCase())) { first = false; return w.toUpperCase(); }
+      if (!/[a-z]/i.test(w) || /^\d/.test(w)) return w.toLowerCase();
+      const out = first ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : w.toLowerCase();
+      first = false;
+      return out;
+    })
+    .join(" ")
+    .replace(/\( /g, "(")
+    .replace(/ \)/g, ")");
+}
+/** The wing or area a task belongs to, e.g. "A-Wing", "External works". */
+export function areaOf(path: string[]) {
+  const a = path[1] ?? path[0] ?? "";
+  if (/^([A-Z])\s*-?\s*WING/i.test(a)) return `${a.match(/^([A-Z])/i)![1].toUpperCase()}-Wing`;
+  if (/external/i.test(a)) return "External works";
+  return niceName(a.replace(/\(.*\)/, ""));
+}
+/** Where inside the area: "RCC work › Super-structure". */
+export const whereOf = (path: string[]) => path.slice(2).map(niceName).join(" › ");
+export function materialName(name: string) {
+  if (/aluform\s*shutter/i.test(name)) return "Aluform shuttering";
+  if (/shutter/i.test(name)) return "Shuttering";
+  if (/concrete/i.test(name)) return "Concrete";
+  if (/aluform/i.test(name)) return "Aluform material";
+  return name;
+}
+/** Whole days from a to b (dates as ISO strings). */
+export const daysBetween = (a: string, b: string) => Math.round((Date.parse(b.slice(0, 10)) - Date.parse(a.slice(0, 10))) / 864e5);
 
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (

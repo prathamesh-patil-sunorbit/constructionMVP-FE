@@ -7,7 +7,8 @@ import type { Project, ScheduleImport, ScheduleTask, ScheduleTaskStatus } from "
 import { Button, ErrorBox, Loading, Modal, Select } from "@/components/ui";
 import { Icon, Spinner } from "@/components/geotech";
 import { CostBreakdown, SchedulePlanner } from "@/components/schedule-planner";
-import { Field, MaterialTable, PercentBar, STATUS_STYLE, TaskStatus, Variance, cx, fmtD, fmtDays, inr, linkText } from "@/components/schedule";
+import { Field, MaterialTable, PercentBar, STATUS_STYLE, TaskStatus, Variance, areaOf, cx, daysBetween, fmtD, fmtDays, inr, linkText, niceName, whereOf } from "@/components/schedule";
+import { todayInput } from "@/lib/format";
 
 const STATUSES: ScheduleTaskStatus[] = ["Overdue", "In Progress", "Not Started", "Completed"];
 
@@ -19,6 +20,9 @@ export default function SchedulePage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = selectedId || imports?.[0]?._id || null;
 
+  const [showUpload, setShowUpload] = useState(false);
+  const uploadOpen = showUpload || (!!imports && !imports.length);
+
   if (!projects) return <Loading />;
 
   return (
@@ -26,22 +30,29 @@ export default function SchedulePage() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-slate-900">MSP Schedule</h1>
-          <p className="text-sm text-slate-500">Upload the Microsoft Project schedule (.mpp) or its Excel export (.xlsx) and see every task, date and delay.</p>
+          <p className="text-sm text-slate-500">The project&apos;s Microsoft Project plan: how far along it is, what is overdue, and what starts next.</p>
         </div>
-        {projects.length > 1 && (
-          <Select value={project} onChange={(e) => { setProjectId(e.target.value); setSelectedId(null); }} className="max-w-60">
-            {projects.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
-          </Select>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {projects.length > 1 && (
+            <Select value={project} onChange={(e) => { setProjectId(e.target.value); setSelectedId(null); }} className="max-w-60">
+              {projects.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
+            </Select>
+          )}
+          {!!imports && imports.length > 1 && <Versions imports={imports} selected={selected} onSelect={setSelectedId} />}
+          {!!imports?.length && (
+            <Button variant={uploadOpen ? "secondary" : "primary"} className="py-2" onClick={() => setShowUpload(!showUpload)}>
+              {uploadOpen ? <><Icon name="x" /> Close</> : <><Icon name="upload" /> Upload new version</>}
+            </Button>
+          )}
+        </div>
       </header>
       <ErrorBox message={error} />
 
-      <div className="grid gap-5 lg:grid-cols-[1fr_20rem]">
-        <UploadCard project={project} onUploaded={(doc) => { setData((list) => [doc, ...(list || [])]); setSelectedId(doc._id); }} />
-        <Versions imports={imports} selected={selected} onSelect={setSelectedId} />
-      </div>
+      {uploadOpen && (
+        <UploadCard project={project} onUploaded={(doc) => { setData((list) => [doc, ...(list || [])]); setSelectedId(doc._id); setShowUpload(false); }} />
+      )}
 
-      {selected && <ScheduleView key={selected} id={selected} onDeleted={() => { setSelectedId(null); reload(); }} />}
+      {selected && <ScheduleView key={selected} id={selected} latest={selected === imports?.[0]?._id} onDeleted={() => { setSelectedId(null); reload(); }} />}
     </div>
   );
 }
@@ -69,7 +80,8 @@ function UploadCard({ project, onUploaded }: { project: string; onUploaded: (d: 
   };
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Icon name="upload" /> Upload schedule</div>
+      <div className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Icon name="upload" /> Upload the schedule</div>
+      <p className="mt-1 text-xs text-slate-500">Upload the updated tracker each time it is saved in MS Project. Site engineers always work from the latest upload.</p>
       <label className={cx("mt-3 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-center transition",
         file ? "border-emerald-300 bg-emerald-50/50" : "border-slate-300 hover:border-slate-400 hover:bg-slate-50")}>
         <Icon name="file" className="h-7 w-7 text-slate-500" />
@@ -89,40 +101,26 @@ function UploadCard({ project, onUploaded }: { project: string; onUploaded: (d: 
   );
 }
 
-function Versions({ imports, selected, onSelect }: { imports: ScheduleImport[] | null; selected: string | null; onSelect: (id: string) => void }) {
+function Versions({ imports, selected, onSelect }: { imports: ScheduleImport[]; selected: string | null; onSelect: (id: string) => void }) {
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-2 text-sm font-semibold text-slate-900">Uploaded schedules</div>
-      {!imports ? <Loading /> : !imports.length ? (
-        <p className="text-sm text-slate-500">Nothing uploaded yet. Site engineers see their day-wise tasks from the latest upload.</p>
-      ) : (
-        <ul className="space-y-1">
-          {imports.map((d, i) => (
-            <li key={d._id}>
-              <button onClick={() => onSelect(d._id)} className={cx("w-full rounded-xl px-3 py-2 text-left transition", d._id === selected ? "bg-slate-900 text-white" : "hover:bg-slate-50")}>
-                <span className="block truncate text-sm font-medium">{d.file.originalName}</span>
-                <span className={cx("text-[11px]", d._id === selected ? "text-slate-300" : "text-slate-500")}>
-                  {d.format.toUpperCase()} · {d.summary.tasks} tasks · {fmtDateTime(d.createdAt)}{i === 0 ? " · used by site engineers" : ""}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+    <Select value={selected ?? ""} onChange={(e) => onSelect(e.target.value)} className="max-w-80" aria-label="Uploaded versions">
+      {imports.map((d, i) => (
+        <option key={d._id} value={d._id}>{i === 0 ? "Latest · " : ""}{d.file.originalName} · {fmtDateTime(d.createdAt)}</option>
+      ))}
+    </Select>
   );
 }
 
 // ---------------------------------------------------------------------------
 
 const TABS = [
-  { key: "overview", label: "Overview" },
-  { key: "tasks", label: "All tasks" },
-  { key: "cost", label: "Cost" },
-  { key: "ai", label: "AI planner" },
+  { key: "overview", label: "Overview", icon: "info" },
+  { key: "tasks", label: "All tasks", icon: "layers" },
+  { key: "cost", label: "Cost", icon: "calc" },
+  { key: "ai", label: "AI planner", icon: "sparkles" },
 ] as const;
 
-function ScheduleView({ id, onDeleted }: { id: string; onDeleted: () => void }) {
+function ScheduleView({ id, latest, onDeleted }: { id: string; latest: boolean; onDeleted: () => void }) {
   const { data: doc, error } = useApi<ScheduleImport>(`/schedule/imports/${id}`);
   const [open, setOpen] = useState<ScheduleTask | null>(null);
   const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("overview");
@@ -131,14 +129,23 @@ function ScheduleView({ id, onDeleted }: { id: string; onDeleted: () => void }) 
   const mpp = doc.format === "mpp";
   return (
     <div className="space-y-5">
-      <Overview doc={doc} onDeleted={onDeleted} />
-      <nav className="flex gap-1 rounded-xl bg-slate-100 p-1">
-        {TABS.map((t) => (
-          <button key={t.key} onClick={() => setTab(t.key)} className={cx("flex-1 rounded-lg px-3 py-2 text-sm font-medium transition", tab === t.key ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900")}>
-            {t.key === "ai" && <Icon name="sparkles" className="mr-1.5 inline h-4 w-4 text-violet-600" />}{t.label}
-          </button>
-        ))}
-      </nav>
+      <Overview doc={doc} latest={latest} onDeleted={onDeleted} />
+      <div className="sticky top-0 z-20 -mx-4 bg-[#f6f7f9]/85 px-4 py-2 backdrop-blur md:-mx-6 md:px-6">
+        <nav role="tablist" className="flex gap-1 overflow-x-auto rounded-2xl border border-slate-200/80 bg-white p-1 shadow-sm">
+          {TABS.map((t) => {
+            const active = tab === t.key;
+            const hint = t.key === "tasks" ? `${doc.summary.workTasks}` : t.key === "overview" && doc.summary.overdue ? `${doc.summary.overdue} overdue` : null;
+            return (
+              <button key={t.key} role="tab" aria-selected={active} onClick={() => setTab(t.key)}
+                className={cx("flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition", active ? "bg-slate-900 text-white shadow" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900")}>
+                <Icon name={t.icon} className={cx("h-4 w-4", t.key === "ai" && !active && "text-violet-600")} />
+                {t.label}
+                {hint && <span className={cx("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", active ? "bg-white/15 text-slate-200" : t.key === "overview" ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-500")}>{hint}</span>}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
       {tab === "overview" && (
         <>
           <BudgetAndMaterials doc={doc} />
@@ -158,7 +165,7 @@ function ScheduleView({ id, onDeleted }: { id: string; onDeleted: () => void }) 
   );
 }
 
-function Overview({ doc, onDeleted }: { doc: ScheduleImport; onDeleted: () => void }) {
+function Overview({ doc, latest, onDeleted }: { doc: ScheduleImport; latest: boolean; onDeleted: () => void }) {
   const s = doc.summary;
   const [busy, setBusy] = useState(false);
   const remove = async () => {
@@ -171,50 +178,65 @@ function Overview({ doc, onDeleted }: { doc: ScheduleImport; onDeleted: () => vo
       setBusy(false);
     }
   };
-  const tiles: { label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: string }[] = [
-    { label: "Overall complete", value: `${s.percent}%`, sub: <PercentBar percent={s.percent} className="mt-1.5" /> },
-    { label: "Finish", value: fmtD(s.finish), sub: <>Baseline {fmtD(s.baselineFinish)} · <Variance days={s.delayDays} /></>, tone: s.delayDays && s.delayDays > 0 ? "text-red-700" : undefined },
-    { label: "Work tasks", value: s.workTasks, sub: `${s.summaries} groups · ${s.milestones} milestones` },
-    { label: "In progress", value: s.inProgress, sub: `${s.startingThisWeek} starting in the next 7 days` },
-    { label: "Overdue", value: s.overdue, sub: "finish date passed, not 100%", tone: s.overdue ? "text-red-700" : undefined },
-    { label: "Completed", value: s.completed, sub: `${s.notStarted} not started yet${s.behindPlan ? ` · ${s.behindPlan} behind plan` : ""}` },
+  const delay = s.delayDays ?? 0;
+  const health = [
+    `${s.percent}% of the work is done.`,
+    s.finish ? `The plan now finishes on ${fmtD(s.finish)}${delay > 0 ? `, ${delay} days later than the baseline (${fmtD(s.baselineFinish)})` : delay < 0 ? `, ${-delay} days ahead of the baseline` : ", on the baseline date"}.` : "",
+    s.overdue ? `${s.overdue} task${s.overdue === 1 ? " is" : "s are"} past ${s.overdue === 1 ? "its" : "their"} finish date${s.behindPlan ? `, and ${s.behindPlan} ${s.behindPlan === 1 ? "is" : "are"} behind plan` : ""}.` : "Nothing is overdue.",
+  ].filter(Boolean).join(" ");
+  const tiles: { label: string; value: React.ReactNode; sub: React.ReactNode; tone?: string }[] = [
+    { label: "Work done", value: `${s.percent}%`, sub: <PercentBar percent={s.percent} className="mt-2" /> },
+    { label: "Expected finish", value: fmtD(s.finish), sub: delay > 0 ? <span className="text-red-300">{delay} days behind baseline</span> : delay < 0 ? <span className="text-emerald-300">{-delay} days ahead</span> : "on the baseline date", tone: delay > 0 ? "text-red-300" : undefined },
+    { label: "Overdue", value: s.overdue, sub: "past the finish date, not complete", tone: s.overdue ? "text-red-300" : undefined },
+    { label: "Behind plan", value: s.behindPlan ?? 0, sub: "less done than planned by now", tone: s.behindPlan ? "text-amber-300" : undefined },
+    { label: "In progress", value: s.inProgress, sub: `${s.startingThisWeek} more start in the next 7 days` },
+    { label: "Completed", value: s.completed, sub: `of ${s.workTasks} tasks · ${s.notStarted} not started` },
   ];
   const total = Math.max(1, s.workTasks);
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900">{doc.title || doc.file.originalName}</h2>
-          <p className="text-xs text-slate-500">
-            {doc.file.originalName} · {doc.format === "mpp" ? doc.application || "Microsoft Project" : `Excel${doc.sheet ? `, sheet ${doc.sheet}` : ""}`}
-            {doc.statusDate ? ` · status date ${fmtD(doc.statusDate)}` : ""}{doc.author ? ` · last saved by ${doc.author}` : ""}
-            {" · "}uploaded by {doc.uploadedBy?.name ?? "—"} {fmtDateTime(doc.createdAt)} · {doc.workDaysPerWeek}-day work week
+    <section className="overflow-hidden rounded-2xl bg-[radial-gradient(120%_140%_at_0%_0%,#1e293b_0%,#0b1120_55%,#060a14_100%)] text-white shadow-[0_18px_40px_-24px_rgba(2,6,23,.8)]">
+      <div className="flex flex-wrap items-start justify-between gap-4 px-6 pt-6">
+        <div className="min-w-0">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-400/15 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-amber-300 ring-1 ring-inset ring-amber-400/30">
+              <Icon name="calendar" className="h-3.5 w-3.5" /> MS Project schedule
+            </span>
+            {latest && <span className="rounded-full bg-emerald-400/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300 ring-1 ring-inset ring-emerald-400/30">Latest · used by site engineers</span>}
+          </div>
+          <h2 className="text-2xl font-semibold tracking-tight">{doc.title || doc.file.originalName}</h2>
+          <p className="mt-1 text-xs text-slate-400">
+            {doc.file.originalName}{doc.statusDate ? ` · status date ${fmtD(doc.statusDate)}` : ""}{doc.author ? ` · saved by ${doc.author}` : ""}
+            {" · "}uploaded {fmtDateTime(doc.createdAt)} by {doc.uploadedBy?.name ?? "—"} · {doc.workDaysPerWeek}-day week
           </p>
         </div>
         <div className="flex gap-2">
-          <a href={`${API_URL}${doc.file.url}`} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"><Icon name="external" /> Download</a>
-          <Button variant="ghost" onClick={remove} disabled={busy}><Icon name="trash" /> Remove</Button>
+          <a href={`${API_URL}${doc.file.url}`} className="inline-flex items-center gap-1.5 rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-sm font-medium text-white hover:bg-white/10"><Icon name="external" /> Download</a>
+          <button onClick={remove} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-300 hover:bg-white/10 hover:text-white disabled:opacity-50"><Icon name="trash" /> Remove</button>
         </div>
       </div>
-      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <p className="mx-6 mt-4 max-w-4xl rounded-xl bg-white/5 px-4 py-3 text-[15px] leading-relaxed text-slate-100 ring-1 ring-inset ring-white/10">{health}</p>
+      <div className="mt-4 grid grid-cols-2 gap-px border-t border-white/10 bg-white/10 md:grid-cols-3 xl:grid-cols-6">
         {tiles.map((t) => (
-          <div key={t.label} className="rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-inset ring-slate-200">
-            <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{t.label}</div>
-            <div className={cx("mt-0.5 text-xl font-semibold tabular-nums", t.tone || "text-slate-900")}>{t.value}</div>
-            {t.sub && <div className="mt-0.5 text-[11px] text-slate-500">{t.sub}</div>}
+          <div key={t.label} className="bg-[#0b1120] px-5 py-4">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{t.label}</div>
+            <div className={cx("mt-1 text-2xl font-semibold tabular-nums", t.tone || "text-white")}>{t.value}</div>
+            <div className="mt-0.5 text-[11px] text-slate-400">{t.sub}</div>
           </div>
         ))}
       </div>
-      <div className="mt-4">
-        <div className="flex h-2.5 overflow-hidden rounded-full">
+      <div className="px-6 pb-5 pt-4">
+        <div className="flex h-2.5 overflow-hidden rounded-full bg-white/10">
           {STATUSES.map((st) => {
             const n = { Overdue: s.overdue, "In Progress": s.inProgress, "Not Started": s.notStarted, Completed: s.completed }[st];
             return n ? <span key={st} className={STATUS_STYLE[st].bar} style={{ width: `${(n / total) * 100}%` }} title={`${st}: ${n}`} /> : null;
           })}
         </div>
-        <div className="mt-1.5 flex flex-wrap gap-x-4 text-[11px] text-slate-500">
-          {STATUSES.map((st) => <span key={st} className="flex items-center gap-1.5"><span className={cx("h-2 w-2 rounded-full", STATUS_STYLE[st].dot)} />{st}</span>)}
-          {s.resources.length > 0 && <span className="ml-auto">Resources: {s.resources.join(", ")}</span>}
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400">
+          {STATUSES.map((st) => {
+            const n = { Overdue: s.overdue, "In Progress": s.inProgress, "Not Started": s.notStarted, Completed: s.completed }[st];
+            return <span key={st} className="flex items-center gap-1.5"><span className={cx("h-2 w-2 rounded-full", STATUS_STYLE[st].dot)} />{st} <b className="tabular-nums text-slate-200">{n}</b></span>;
+          })}
+          <span className="ml-auto">all {s.workTasks} work tasks</span>
         </div>
       </div>
     </section>
@@ -231,7 +253,7 @@ function BudgetAndMaterials({ doc }: { doc: ScheduleImport }) {
     <div className="grid gap-4 lg:grid-cols-[18rem_1fr]">
       {s.cost != null && (
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="text-sm font-semibold text-slate-900">Budget</div>
+          <div className="text-sm font-semibold text-slate-900">Budget <span className="font-normal text-slate-500">from the schedule&apos;s costs</span></div>
           <div className="mt-3 text-2xl font-semibold tabular-nums">{inr(s.cost)}</div>
           <div className="text-xs text-slate-500">current cost · baseline {inr(s.baselineCost)}
             {saving != null && saving !== 0 && <span className={saving > 0 ? " text-emerald-700" : " text-red-700"}> ({saving > 0 ? `${inr(saving)} under` : `${inr(-saving)} over`})</span>}
@@ -243,7 +265,7 @@ function BudgetAndMaterials({ doc }: { doc: ScheduleImport }) {
       )}
       {materials.length > 0 && (
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-2 text-sm font-semibold text-slate-900">Materials in the schedule <span className="font-normal text-slate-500">planned vs used, all tasks</span></div>
+          <div className="mb-2 text-sm font-semibold text-slate-900">Materials <span className="font-normal text-slate-500">planned for the whole project vs used so far</span></div>
           <MaterialTable materials={materials} />
         </section>
       )}
@@ -253,31 +275,52 @@ function BudgetAndMaterials({ doc }: { doc: ScheduleImport }) {
 
 function NowOnSite({ tasks, onOpen }: { tasks: ScheduleTask[]; onOpen: (t: ScheduleTask) => void }) {
   const work = tasks.filter((t) => !t.summary);
+  const [today] = useState(todayInput);
   const [horizon] = useState(() => Date.now() + 14 * 864e5);
-  const groups = [
-    { title: "Overdue", tone: "border-red-200", list: work.filter((t) => t.status === "Overdue") },
-    { title: "In progress now", tone: "border-sky-200", list: work.filter((t) => t.status === "In Progress") },
+  const groups: { title: string; hint: string; head: string; bar: string; list: ScheduleTask[]; when: (t: ScheduleTask) => React.ReactNode }[] = [
     {
-      title: "Starting in the next 14 days", tone: "border-slate-200",
+      title: "Overdue", hint: "past the finish date, not complete", head: "text-red-700", bar: "bg-red-500",
+      list: work.filter((t) => t.status === "Overdue").sort((a, b) => (a.finish! < b.finish! ? -1 : 1)),
+      when: (t) => { const d = t.finish ? daysBetween(t.finish, today) : 0; return <span className="font-medium text-red-700" title={`Was due ${fmtD(t.finish)}`}>{d}d overdue · due {fmtD(t.finish)}</span>; },
+    },
+    {
+      title: "In progress now", hint: "started, not finished", head: "text-sky-700", bar: "bg-sky-500",
+      list: work.filter((t) => t.status === "In Progress").sort((a, b) => (a.finish! < b.finish! ? -1 : 1)),
+      when: (t) => { const d = t.finish ? daysBetween(today, t.finish) : 0; return <>due {d <= 0 ? "today" : `in ${d} day${d === 1 ? "" : "s"}`} · {fmtD(t.finish)}</>; },
+    },
+    {
+      title: "Starting soon", hint: "in the next 14 days", head: "text-slate-700", bar: "bg-slate-400",
       list: work.filter((t) => t.status === "Not Started" && t.start && new Date(t.start).getTime() < horizon).sort((a, b) => (a.start! < b.start! ? -1 : 1)),
+      when: (t) => { const d = t.start ? daysBetween(today, t.start) : 0; return <>starts {d <= 0 ? "today" : `in ${d} day${d === 1 ? "" : "s"}`} · {fmtD(t.start)}</>; },
     },
   ];
   return (
     <div className="grid gap-4 lg:grid-cols-3">
       {groups.map((g) => (
-        <section key={g.title} className={cx("rounded-2xl border bg-white p-4 shadow-sm", g.tone)}>
-          <div className="mb-2 flex items-center justify-between text-sm font-semibold text-slate-900">{g.title}<span className="text-xs font-normal text-slate-500">{g.list.length}</span></div>
-          {!g.list.length ? <p className="text-sm text-slate-400">None</p> : (
-            <ul className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
+        <section key={g.title} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className={cx("h-1", g.bar)} />
+          <div className="flex items-baseline justify-between gap-2 px-4 pb-2 pt-3">
+            <div>
+              <div className={cx("text-sm font-semibold", g.head)}>{g.title}</div>
+              <div className="text-[11px] text-slate-500">{g.hint}</div>
+            </div>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">{g.list.length}</span>
+          </div>
+          {!g.list.length ? <p className="px-4 pb-4 text-sm text-slate-400">None</p> : (
+            <ul className="max-h-80 divide-y divide-slate-100 overflow-y-auto border-t border-slate-100">
               {g.list.map((t) => (
                 <li key={t.uid}>
-                  <button onClick={() => onOpen(t)} className="w-full rounded-lg px-2 py-1.5 text-left hover:bg-slate-50">
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{t.name}</span>
-                      <span className="text-xs tabular-nums text-slate-500">{t.percent}%</span>
+                  <button onClick={() => onOpen(t)} className="w-full px-4 py-2.5 text-left transition hover:bg-slate-50">
+                    <div className="flex items-start gap-2">
+                      <span className="min-w-0 flex-1 text-sm font-medium leading-snug text-slate-900">{niceName(t.name)}</span>
+                      {t.critical && <span className="rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 ring-1 ring-inset ring-red-200" title="Any delay here delays the project">Critical</span>}
                     </div>
-                    <div className="truncate text-[11px] text-slate-500">{t.path.slice(1).join(" › ")}</div>
-                    <div className="text-[11px] text-slate-500">{fmtD(t.start)} → {fmtD(t.finish)} · <Variance days={t.finishVarianceDays} /></div>
+                    <div className="truncate text-[11px] text-slate-500">{areaOf(t.path)}{whereOf(t.path) ? ` · ${whereOf(t.path)}` : ""}</div>
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <PercentBar percent={t.percent} expected={t.plannedPercent} className="max-w-28" />
+                      <span className="w-9 text-[11px] tabular-nums text-slate-600">{t.percent}%</span>
+                      <span className="min-w-0 truncate text-[11px] text-slate-500">{g.when(t)}</span>
+                    </div>
                   </button>
                 </li>
               ))}
@@ -355,7 +398,7 @@ function TaskTable({ doc, onOpen }: { doc: ScheduleImport; onOpen: (t: ScheduleT
         <table className="w-full min-w-[980px] text-left text-sm">
           <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_#e2e8f0]">
             <tr className="text-[11px] uppercase tracking-wide text-slate-500">
-              {["WBS", "Task", "Duration", "Start", "Finish", "Baseline finish", "Variance", "Cost", "Complete", "Status"].map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}
+              {["WBS", "Task", "Duration", "Start", "Finish", "Baseline finish", "Vs baseline", "Cost", "Complete", "Status"].map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -380,7 +423,7 @@ function TaskTable({ doc, onOpen }: { doc: ScheduleImport; onOpen: (t: ScheduleT
                 <td className="whitespace-nowrap px-3 py-1.5 tabular-nums">{fmtD(t.start)}</td>
                 <td className="whitespace-nowrap px-3 py-1.5 tabular-nums">{fmtD(t.finish)}</td>
                 <td className="whitespace-nowrap px-3 py-1.5 tabular-nums text-slate-500">{fmtD(t.baselineFinish)}</td>
-                <td className="whitespace-nowrap px-3 py-1.5 text-xs"><Variance days={t.finishVarianceDays} /></td>
+                <td className="whitespace-nowrap px-3 py-1.5 text-xs"><Variance days={t.finishVarianceDays} short /></td>
                 <td className="whitespace-nowrap px-3 py-1.5 text-xs tabular-nums text-slate-600">{t.cost ? inr(t.cost) : "—"}</td>
                 <td className="w-32 px-3 py-1.5"><div className="flex items-center gap-2"><PercentBar percent={t.percent} expected={t.plannedPercent} /><span className="w-9 text-right text-xs tabular-nums text-slate-600">{t.percent}%</span></div></td>
                 <td className="px-3 py-1.5"><TaskStatus value={t.status} /></td>

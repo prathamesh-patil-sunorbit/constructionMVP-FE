@@ -6,7 +6,7 @@ import { fmtDateTime, fmtWeekday, todayInput } from "@/lib/format";
 import type { DayTask, DayTasks, Project, ScheduleMaterial } from "@/lib/types";
 import { ErrorBox, Loading, Select } from "@/components/ui";
 import { Icon } from "@/components/geotech";
-import { cx, fmtD, inr, linkText, qty } from "@/components/schedule";
+import { areaOf, cx, daysBetween, fmtD, inr, linkText, materialName, niceName, qty, whereOf } from "@/components/schedule";
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const shift = (day: string, n: number) => {
@@ -14,50 +14,15 @@ const shift = (day: string, n: number) => {
   d.setUTCDate(d.getUTCDate() + n);
   return iso(d);
 };
-const daysBetween = (a: string, b: string) => Math.round((Date.parse(b.slice(0, 10)) - Date.parse(a.slice(0, 10))) / 864e5);
-
-// ---------------------------------------------------------------------------
-// Plain names: the schedule is written in capitals with long wing names.
-// ---------------------------------------------------------------------------
-
-const KEEP = new Set(["RCC", "PCC", "UGWT", "STP", "NOC", "NOC'S", "CP", "VDP", "MEP", "LW", "R/F", "ST.", "DG", "A", "B"]);
-function nice(s: string) {
-  let first = true; // capitalise the first word with letters ("04 Slab (podium 3 floor slab)")
-  return s
-    .replace(/\s+/g, " ")
-    .replace(/-\s+/g, "-")
-    .trim()
-    .split(" ")
-    .map((w) => {
-      if (KEEP.has(w.toUpperCase())) { first = false; return w.toUpperCase(); }
-      if (!/[a-z]/i.test(w) || /^\d/.test(w)) return w.toLowerCase();
-      const out = first ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : w.toLowerCase();
-      first = false;
-      return out;
-    })
-    .join(" ")
-    .replace(/\( /g, "(")
-    .replace(/ \)/g, ")");
-}
-function area(path: string[]) {
-  const a = path[1] ?? path[0] ?? "";
-  if (/^([A-Z])\s*-?\s*WING/i.test(a)) return `${a.match(/^([A-Z])/i)![1].toUpperCase()}-Wing`;
-  if (/external/i.test(a)) return "External works";
-  return nice(a.replace(/\(.*\)/, ""));
-}
-const where = (path: string[]) => path.slice(2).map(nice).join(" › ");
-function material(name: string) {
-  if (/aluform\s*shutter/i.test(name)) return "Aluform shuttering";
-  if (/shutter/i.test(name)) return "Shuttering";
-  if (/concrete/i.test(name)) return "Concrete";
-  if (/aluform/i.test(name)) return "Aluform material";
-  return name;
-}
+const nice = niceName;
+const area = areaOf;
+const where = whereOf;
+const material = materialName;
 
 // What the engineer needs to know about a task on the chosen day, in one word.
 type Tone = "late" | "due" | "start" | "behind" | "ok" | "done";
 const TONE: Record<Tone, { label: string; cls: string; dot: string }> = {
-  late: { label: "Late", cls: "bg-red-100 text-red-800", dot: "bg-red-500" },
+  late: { label: "Overdue", cls: "bg-red-100 text-red-800", dot: "bg-red-500" },
   due: { label: "Due today", cls: "bg-amber-100 text-amber-900", dot: "bg-amber-500" },
   start: { label: "Starts today", cls: "bg-emerald-100 text-emerald-800", dot: "bg-emerald-500" },
   behind: { label: "Behind", cls: "bg-orange-100 text-orange-800", dot: "bg-orange-500" },
@@ -94,10 +59,13 @@ export default function MspTasksPage() {
         <div>
           <h1 className="text-xl font-semibold text-slate-900">MSP Tasks</h1>
           <p className="text-sm text-slate-500">
-            {data?.import
-              ? <>Your work from <b>{data.import.file.originalName}</b> · updated {fmtDateTime(data.import.createdAt)} by {data.import.uploadedBy?.name ?? "—"}</>
-              : "Your work from the project schedule, day by day."}
+            What the schedule puts on site each day: pick a day to see its tasks, how far along each one is, and the materials it needs.
           </p>
+          {data?.import && (
+            <p className="mt-1 text-xs text-slate-400">
+              From {data.import.file.originalName} · uploaded {fmtDateTime(data.import.createdAt)} by {data.import.uploadedBy?.name ?? "—"}
+            </p>
+          )}
         </div>
         {projects.length > 1 && (
           <Select value={project} onChange={(e) => setProjectId(e.target.value)} className="max-w-60">
@@ -177,62 +145,89 @@ function DayView({ day, overdue, isToday }: { day: DayTasks["days"][number]; ove
     }
   }
 
+  const [showAllLate, setShowAllLate] = useState(false);
+  const lateShown = showAllLate ? late : late.slice(0, 4);
+  const stats: { n: number; label: string; hint: string; tone: string }[] = [
+    { n: rows.length, label: "On site", hint: "tasks running this day", tone: "text-white" },
+    { n: late.length, label: "Overdue", hint: "past their due date", tone: late.length ? "text-red-300" : "text-white" },
+    { n: count("behind"), label: "Behind", hint: "less done than they should be", tone: count("behind") ? "text-amber-300" : "text-white" },
+    { n: count("due"), label: "Due", hint: isToday ? "must finish today" : "finish this day", tone: "text-white" },
+    { n: count("start"), label: "Starting", hint: isToday ? "begin today" : "begin this day", tone: "text-white" },
+  ];
+
   return (
-    <section className="space-y-4">
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h2 className="text-lg font-semibold text-slate-900">{isToday ? "Today, " : ""}{fmtWeekday(day.date)}</h2>
-          {!day.workDay && <span className="text-sm text-slate-500">{day.holiday ? `Holiday: ${nice(day.holiday)}` : "Sunday"} — no work planned</span>}
+    <section className="space-y-5">
+      <div className="overflow-hidden rounded-2xl bg-[radial-gradient(120%_140%_at_0%_0%,#1e293b_0%,#0b1120_55%,#060a14_100%)] text-white shadow-[0_18px_40px_-24px_rgba(2,6,23,.8)]">
+        <div className="px-6 pt-5">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-300">{isToday ? "Today" : "Day plan"}</div>
+          <h2 className="mt-0.5 text-2xl font-semibold tracking-tight">{fmtWeekday(day.date)}</h2>
+          {!day.workDay && <p className="mt-1 text-sm text-slate-300">{day.holiday ? `Holiday: ${nice(day.holiday)}` : "Sunday"}: no work is planned.</p>}
         </div>
         {day.workDay && (
-          <div className="mt-3 flex flex-wrap gap-2 text-sm">
-            <Chip n={rows.length} label="tasks on site" cls="bg-slate-100 text-slate-800" />
-            {late.length > 0 && <Chip n={late.length} label="late" cls={TONE.late.cls} />}
-            {count("due") > 0 && <Chip n={count("due")} label="due today" cls={TONE.due.cls} />}
-            {count("start") > 0 && <Chip n={count("start")} label="start today" cls={TONE.start.cls} />}
-            {count("behind") > 0 && <Chip n={count("behind")} label="behind" cls={TONE.behind.cls} />}
+          <div className="mt-4 grid grid-cols-2 gap-px border-y border-white/10 bg-white/10 sm:grid-cols-3 lg:grid-cols-5">
+            {stats.map((st) => (
+              <div key={st.label} className="bg-[#0b1120] px-5 py-3">
+                <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{st.label}</div>
+                <div className={cx("text-2xl font-semibold tabular-nums", st.tone)}>{st.n}</div>
+                <div className="text-[11px] text-slate-400">{st.hint}</div>
+              </div>
+            ))}
           </div>
         )}
-        {mats.size > 0 && (
-          <div className="mt-3 border-t border-slate-100 pt-3">
-            <div className="mb-1.5 text-xs font-medium text-slate-500">Materials needed {isToday ? "today" : "this day"}</div>
+        {mats.size > 0 ? (
+          <div className="px-6 py-4">
+            <div className="mb-2 text-xs font-medium text-slate-400">Materials needed {isToday ? "today" : "this day"}, across all its tasks</div>
             <div className="flex flex-wrap gap-2">
               {[...mats.values()].map((m) => (
-                <span key={`${m.name}|${m.unit}`} className="rounded-lg bg-amber-50 px-3 py-1.5 text-sm ring-1 ring-inset ring-amber-200">
-                  <span className="text-slate-600">{m.name}</span> <b className="tabular-nums text-slate-900">{qty(Math.round(m.amount * 10) / 10, m.unit)}</b>
+                <span key={`${m.name}|${m.unit}`} className="rounded-lg bg-amber-400/10 px-3 py-1.5 text-sm ring-1 ring-inset ring-amber-400/30">
+                  <span className="text-amber-100/80">{m.name}</span> <b className="tabular-nums text-amber-200">{qty(Math.round(m.amount * 10) / 10, m.unit)}</b>
                 </span>
               ))}
             </div>
           </div>
-        )}
+        ) : <div className="h-4" />}
       </div>
 
-      {late.length > 0 && (
-        <Group title="Late — finish these first" tone="text-red-700">
-          {late.map((t) => <TaskRow key={`late-${t.uid}`} t={t} tone="late" on={date} />)}
-        </Group>
+      {day.workDay && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-slate-500">
+          <span className="font-medium text-slate-600">Status:</span>
+          {(["ok", "behind", "start", "due", "late"] as Tone[]).map((k) => (
+            <span key={k} className="flex items-center gap-1.5"><span className={cx("h-2 w-2 rounded-full", TONE[k].dot)} />{TONE[k].label}</span>
+          ))}
+        </div>
       )}
 
       {day.workDay && !rows.length && (
         <p className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">No scheduled tasks on this day.</p>
       )}
       {day.workDay && groups.map(([name, list]) => (
-        <Group key={name} title={`${name} · ${list.length} task${list.length === 1 ? "" : "s"}`}>
+        <Group key={name} title={name} count={list.length} hint={isToday ? "on site today" : "on site this day"}>
           {list.map(({ t, tone }) => <TaskRow key={t.uid} t={t} tone={tone} on={date} />)}
         </Group>
       ))}
+
+      {late.length > 0 && (
+        <Group title="Overdue — finish these first" count={late.length} hint="past their due date and still open" tone="text-red-700">
+          {lateShown.map((t) => <TaskRow key={`late-${t.uid}`} t={t} tone="late" on={date} />)}
+          {late.length > 4 && (
+            <button onClick={() => setShowAllLate(!showAllLate)} className="w-full bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100">
+              {showAllLate ? "Show fewer" : `Show all ${late.length} overdue tasks`}
+            </button>
+          )}
+        </Group>
+      )}
     </section>
   );
 }
 
-const Chip = ({ n, label, cls }: { n: number; label: string; cls: string }) => (
-  <span className={cx("rounded-full px-3 py-1", cls)}><b className="tabular-nums">{n}</b> {label}</span>
-);
-
-function Group({ title, tone, children }: { title: string; tone?: string; children: React.ReactNode }) {
+function Group({ title, count, hint, tone, children }: { title: string; count?: number; hint?: string; tone?: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className={cx("mb-2 px-1 text-xs font-semibold uppercase tracking-wider", tone || "text-slate-500")}>{title}</div>
+      <div className="mb-2 flex items-baseline gap-2 px-1">
+        <span className={cx("text-sm font-semibold", tone || "text-slate-900")}>{title}</span>
+        {count != null && <span className="rounded-full bg-slate-200/70 px-2 py-0.5 text-[11px] font-semibold text-slate-700">{count}</span>}
+        {hint && <span className="text-xs text-slate-500">{hint}</span>}
+      </div>
       <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">{children}</div>
     </div>
   );
@@ -243,7 +238,7 @@ function TaskRow({ t, tone, on }: { t: DayTask; tone: Tone; on: string }) {
   const s = TONE[tone];
   const left = daysBetween(on, t.finish);
   const due = tone === "late"
-    ? `${t.daysLate ?? -left} day${(t.daysLate ?? -left) === 1 ? "" : "s"} late · was due ${fmtD(t.finish)}`
+    ? `${t.daysLate ?? -left} day${(t.daysLate ?? -left) === 1 ? "" : "s"} overdue · was due ${fmtD(t.finish)}`
     : left <= 0 ? "Due today" : `Due in ${left} day${left === 1 ? "" : "s"} · ${fmtD(t.finish)}`;
   const today = t.materials.filter((m) => m.perDay && m.unit !== "Rs.");
   return (
